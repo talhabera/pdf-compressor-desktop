@@ -24,3 +24,6 @@ nsis:
   oneClick: false
   perMachine: false
   allowToChangeInstallationDirectory: true
+  # Silently installs the bundled VC++ redistributable after app files are in
+  # place — see the comment in the file itself for why this is required.
+  include: build/installer.nsh

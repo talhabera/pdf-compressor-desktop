@@ -41,8 +41,16 @@ rm -rf "${WORK}/win-extract"
 # who actually check the exit status.
 SRC_DLL="${WORK}/win-extract/bin/gsdll64.dll"
 SRC_EXE="${WORK}/win-extract/bin/gswin64c.exe"
-[ -f "${SRC_DLL}" ] && [ -f "${SRC_EXE}" ] \
-  || { echo "ERROR: extraction produced no bin/gsdll64.dll and bin/gswin64c.exe."; exit 1; }
+# The redistributable installer for the VC++ runtime gswin64c.exe/gsdll64.dll
+# dynamically link against (see the dependency gate below). It ships inside
+# this same NSIS installer because 7zz can only reach the installer's own
+# resource section here (513 KB) and not the runtime payload itself, so it
+# cannot be extracted standalone — we bundle the whole redistributable
+# installer instead and run it silently at install time
+# (build/installer.nsh).
+SRC_VCREDIST="${WORK}/win-extract/vcredist_x64.exe"
+[ -f "${SRC_DLL}" ] && [ -f "${SRC_EXE}" ] && [ -f "${SRC_VCREDIST}" ] \
+  || { echo "ERROR: extraction produced no bin/gsdll64.dll, bin/gswin64c.exe, and/or vcredist_x64.exe."; exit 1; }
 
 # Verify the payload rather than relying on the extractor's exit status. The
 # real gsdll64.dll is ~25 MB; the bogus installer-UI plugin DLLs that a bad
@@ -53,10 +61,25 @@ if [ "${DLL_SIZE}" -lt $((20 * 1024 * 1024)) ]; then
   echo "That is the signature of a partial extraction. Refusing to install."
   exit 1
 fi
+VCREDIST_SIZE=$(stat -f%z "${SRC_VCREDIST}" 2>/dev/null || stat -c%s "${SRC_VCREDIST}")
+if [ "${VCREDIST_SIZE}" -lt $((20 * 1024 * 1024)) ]; then
+  echo "ERROR: vcredist_x64.exe is only ${VCREDIST_SIZE} bytes (expected ~25 MB)."
+  echo "That is the signature of a partial extraction. Refusing to install."
+  exit 1
+fi
+
+# Dependency gate: fail loudly if either binary needs a DLL that Windows
+# doesn't ship, we don't bundle, and the redistributable above doesn't cover.
+# This is the Windows equivalent of the otool -L gate below for macOS — see
+# scripts/check-pe-imports.mjs for why it exists (VCRUNTIME140.dll and
+# friends produce a silent loader failure with no stderr, not a spawn error).
+node "${ROOT}/scripts/check-pe-imports.mjs" "${SRC_EXE}" "${SRC_DLL}" \
+  || { echo "Refusing to install these Windows binaries."; exit 1; }
 
 cp "${SRC_EXE}" "${ROOT}/resources/gs/win/"
 cp "${SRC_DLL}" "${ROOT}/resources/gs/win/"
-echo "OK: resources/gs/win/ (gsdll64.dll ${DLL_SIZE} bytes)"
+cp "${SRC_VCREDIST}" "${ROOT}/resources/gs/win/"
+echo "OK: resources/gs/win/ (gsdll64.dll ${DLL_SIZE} bytes, vcredist_x64.exe ${VCREDIST_SIZE} bytes)"
 
 # --- macOS: build from source so the binary needs no external libraries -------
 say "macOS binary (building from source)"

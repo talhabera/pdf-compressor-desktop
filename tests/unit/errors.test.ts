@@ -50,6 +50,16 @@ describe('classifyFailure', () => {
       .toBe('gs-missing')
   })
 
+  it('recognises the Windows loader failure from a missing VC++ runtime', () => {
+    // STATUS_DLL_NOT_FOUND (0xC0000135): CreateProcess succeeds, the loader
+    // then fails to resolve VCRUNTIME140.dll et al. This is a clean exit
+    // with empty stderr, not a spawn error, so it must be caught by exit
+    // code rather than by `code` (ENOENT/EACCES) or any stderr pattern.
+    expect(classifyFailure(gsErr('', 3221225781)).kind).toBe('gs-missing')
+    // Node on Windows may surface the same DWORD as a signed 32-bit value.
+    expect(classifyFailure(gsErr('', -1073741515)).kind).toBe('gs-missing')
+  })
+
   it('recognises cancellation', () => {
     expect(classifyFailure(gsErr('', null)).kind).toBe('cancelled')
   })

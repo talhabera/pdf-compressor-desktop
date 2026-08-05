@@ -30,6 +30,22 @@ const STDERR_PATTERNS: ReadonlyArray<[RegExp, FailureKind]> = [
   ],
 ]
 
+// STATUS_DLL_NOT_FOUND (0xC0000135). Windows reports this as the child
+// process's exit code when the loader can't resolve a dependency — e.g. the
+// VC++ runtime gswin64c.exe/gsdll64.dll need, if resources/gs/win/
+// vcredist_x64.exe was never run (see build/installer.nsh). CreateProcess
+// itself succeeds, so this arrives as a normal `close` event with a non-zero
+// exit code and empty stderr, not as a spawn error — `nodeErrorCode` above
+// never sees it. Without this mapping it falls through to 'unknown' and a
+// broken installation gets reported as "Compression failed on this file.",
+// blaming the user's PDF for what is actually a missing runtime dependency.
+//
+// Both the unsigned DWORD value (3221225781) and its signed 32-bit
+// reinterpretation (-1073741515) are checked: this project has never run on
+// an actual Windows machine, so which form Node's `close` event surfaces is
+// unconfirmed — see Task 4's report for what remains unverified.
+const DLL_NOT_FOUND_EXIT_CODES: ReadonlySet<number> = new Set([3221225781, -1073741515])
+
 function nodeErrorCode(err: unknown): string | null {
   if (typeof err === 'object' && err !== null && 'code' in err) {
     const { code } = err as { code: unknown }
@@ -52,6 +68,9 @@ export function classifyFailure(err: unknown): CompressFailure {
   if (code === 'ENOENT' || code === 'EACCES') return build('gs-missing')
 
   if (err instanceof GsError) {
+    if (err.exitCode !== null && DLL_NOT_FOUND_EXIT_CODES.has(err.exitCode)) {
+      return build('gs-missing')
+    }
     for (const [pattern, kind] of STDERR_PATTERNS) {
       if (pattern.test(err.stderr)) return { ...build(kind), details: err.stderr }
     }
