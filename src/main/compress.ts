@@ -1,0 +1,108 @@
+import type { CompressOutcome, CompressProgress, Rung } from '@shared/types'
+import { FLOOR_INDEX, MAX_INDEX, RUNGS } from './ladder'
+
+export interface RungResult {
+  path: string
+  bytes: number
+}
+
+export type RungRunner = (rung: Rung) => Promise<RungResult>
+
+export interface CompressOptions {
+  inputPath: string
+  inputBytes: number
+  targetBytes: number
+  /** When true, search rungs 12-15 instead of 1-11. */
+  allowSqueeze: boolean
+  runRung: RungRunner
+  onProgress?: (progress: CompressProgress) => void
+}
+
+/** Rung 0 + the floor probe + ceil(log2(11)) binary-search steps. */
+export const ESTIMATED_ATTEMPTS = 6
+
+export async function compress(opts: CompressOptions): Promise<CompressOutcome> {
+  const { targetBytes, allowSqueeze, runRung, onProgress } = opts
+
+  const measured = new Map<number, RungResult>()
+  let attempts = 0
+
+  const run = async (index: number): Promise<RungResult> => {
+    const cached = measured.get(index)
+    if (cached) return cached
+
+    const rung = RUNGS[index]!
+    attempts++
+    onProgress?.({
+      attempt: attempts,
+      estimatedTotal: ESTIMATED_ATTEMPTS,
+      rungIndex: index,
+      rungLabel: rung.label,
+      dpi: rung.dpi,
+    })
+    const result = await runRung(rung)
+    measured.set(index, result)
+    return result
+  }
+
+  const done = (
+    status: CompressOutcome['status'],
+    index: number,
+    result: RungResult,
+  ): CompressOutcome => ({
+    status,
+    outputPath: result.path,
+    bytes: result.bytes,
+    rungIndex: index,
+    rungLabel: RUNGS[index]!.label,
+    attempts,
+  })
+
+  if (!allowSqueeze) {
+    if (opts.inputBytes <= targetBytes) {
+      return {
+        status: 'already-small',
+        outputPath: null,
+        bytes: opts.inputBytes,
+        rungIndex: null,
+        rungLabel: null,
+        attempts: 0,
+      }
+    }
+
+    // Structural pass first: if it fits, the target costs no quality at all.
+    const structural = await run(0)
+    if (structural.bytes <= targetBytes) return done('hit-target', 0, structural)
+  }
+
+  const lowest = allowSqueeze ? FLOOR_INDEX + 1 : 1
+  const harshest = allowSqueeze ? MAX_INDEX : FLOOR_INDEX
+
+  // If the harshest permitted rung still misses, nothing between it and rung 0 can fit.
+  const harshestResult = await run(harshest)
+  if (harshestResult.bytes > targetBytes) {
+    return done(allowSqueeze ? 'impossible' : 'floor-reached', harshest, harshestResult)
+  }
+
+  // Binary search for the lowest index (= highest quality) that fits. `best` only
+  // ever holds a rung whose output size was measured at or under target, so the
+  // result stays correct even if the ladder is not perfectly monotonic.
+  let bestIndex = harshest
+  let best = harshestResult
+  let low = lowest
+  let high = harshest - 1
+
+  while (low <= high) {
+    const mid = Math.floor((low + high) / 2)
+    const result = await run(mid)
+    if (result.bytes <= targetBytes) {
+      bestIndex = mid
+      best = result
+      high = mid - 1
+    } else {
+      low = mid + 1
+    }
+  }
+
+  return done('hit-target', bestIndex, best)
+}
