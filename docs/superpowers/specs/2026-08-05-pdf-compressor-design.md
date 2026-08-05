@@ -62,7 +62,7 @@ harshest.
 
 | Rung | DPI | QFactor | Notes |
 |---|---|---|---|
-| 0 | — | — | Structural only. Zero quality loss — requires forcing `FlateEncode`, since `pdfwrite`'s `AutoFilter` default silently applies lossy JPEG. |
+| 0 | — | — | Structural only. No image-quality loss — requires forcing `FlateEncode`, since `pdfwrite`'s `AutoFilter` default silently applies lossy JPEG. Note this is *not* byte-preserving: `pdfwrite` rewrites the document, and interactive form fields and signatures are lost at every rung including this one (see below). |
 | 1–8 | 250 → 166 | 0.15 → 0.34 | high quality |
 | 9–15 | 158 → 110 | 0.37 → 0.65 | reduced image quality |
 | 16–22 | 102 → 72 | 0.72 → 2.00 | heavily compressed; **22 is the readability floor** |
@@ -85,6 +85,15 @@ the "Squeeze harder" button.
 Text and vector content is never rasterized at any rung. Ghostscript's `pdfwrite`
 device re-encodes embedded raster images only; glyphs stay glyphs and remain
 selectable and searchable in the output at every rung, including 26.
+
+**Interactive form fields and digital signatures are lost at every rung**,
+including rung 0. Ghostscript's `pdfwrite` rebuilds the document and cannot
+carry an AcroForm through. Verified directly: a PDF with a filled text field, a
+checked checkbox, a link, a bookmark and metadata came back with the link,
+bookmark, metadata and all visible text intact, and the AcroForm gone. The
+practical consequence is that a signed document is returned looking identical
+and silently unsigned. This is not fixable within Ghostscript, so the
+obligation is to say so plainly wherever the app claims to lose nothing.
 
 **Colour is preserved at every rung.** An earlier version of this design
 converted rungs 11 and below to grayscale (in a coarser 16-rung table), which bought 37–52% but turned colour

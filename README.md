@@ -3,6 +3,29 @@
 A small desktop app that compresses a PDF down to a size you choose. Built for
 macOS (Apple Silicon) and Windows.
 
+You give it a file and a number — say 1.75 MB, because some upload form insists
+on it — and it works out the gentlest compression that gets under the line,
+rather than flattening everything to a fixed preset.
+
+## Before you rely on it
+
+Two limits worth knowing up front, because neither is obvious from using it.
+
+**Digital signatures and fillable form fields do not survive.** The compression
+engine is Ghostscript, and its PDF writer cannot preserve interactive form
+fields — so a signed contract comes back looking identical and is no longer
+signed, and a blank fillable form stops being fillable. The visible content,
+text, links and bookmarks are all preserved; only the interactive layer is
+lost. **Don't compress a document whose signature matters.**
+
+**The Windows build has never been run on Windows.** It is built and verified
+from macOS: the binaries are the official Windows ones, their dependencies are
+checked, and the Visual C++ runtime they need is bundled and installed by the
+setup program. But nobody has executed it end to end on an actual Windows
+machine. If it fails, it should tell you plainly that the installation is at
+fault rather than blaming your file — that path is tested. Treat the first run
+as the real test.
+
 ## For users
 
 Download the installer for your system, open it, and drag the app where it
@@ -92,7 +115,7 @@ binary. If an Intel Mac ever needs support, run `fetch-gs` on one and `lipo
 
 Compression is a fixed ladder of 16 quality rungs, each a pair of image DPI
 and JPEG QFactor settings, defined in `src/main/ladder.ts`. Rung 0 is
-structural only and loses nothing. Rung 11 is the *readability floor* — the
+structural only and loses no image quality. Rung 22 is the *readability floor* — the
 harshest setting applied without the user explicitly asking. Rungs 12–15 are
 reachable only via "Squeeze harder".
 
@@ -129,5 +152,20 @@ Copying Homebrew's `gs` into place will not work: the gate rejects it, correctly
 
 ## Licence
 
-This app bundles Ghostscript, which is licensed under the AGPL. It is
-distributed privately and is not published.
+**AGPL-3.0-or-later.** See [LICENSE](LICENSE).
+
+This is not a preference — it follows from what the app bundles. Compression is
+performed by [Ghostscript](https://www.ghostscript.com/), which is licensed
+under the GNU AGPL v3, and a distributed work that includes it must carry the
+same licence with its source available. That is what this repository is.
+
+Practically, for anyone using or forking this: you may use, modify and
+redistribute it freely, and if you distribute a modified version — including
+running it as a network service — you must publish your source under the same
+licence.
+
+Ghostscript is copyright Artifex Software, Inc. The binaries this project
+bundles are built from Artifex's official sources by
+`scripts/fetch-ghostscript.sh`; they are not modified. Ghostscript is also
+available commercially under a different licence from Artifex if the AGPL does
+not suit your use.
