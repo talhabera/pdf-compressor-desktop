@@ -106,11 +106,13 @@ describe('buildGsArgs', () => {
     expect(args(15)).toContain('-dMonoImageResolution=300')
   })
 
-  it('passes the rung QFactor into all four image dicts', () => {
+  it('passes the rung QFactor into all four image dicts with 4:2:0 chroma subsampling', () => {
     const a = args(5)
     const c = a[a.indexOf('-c') + 1]!
     expect(c).toContain('setdistillerparams')
     expect(c.match(/\/QFactor 0\.4\b/g)).toHaveLength(4)
+    expect(c.match(/\/HSamples \[2 1 1 1\]/g)).toHaveLength(4)
+    expect(c.match(/\/VSamples \[2 1 1 1\]/g)).toHaveLength(4)
     for (const key of ['ColorACSImageDict', 'ColorImageDict', 'GrayACSImageDict', 'GrayImageDict']) {
       expect(c).toContain(key)
     }
