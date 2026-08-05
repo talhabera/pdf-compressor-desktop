@@ -529,12 +529,26 @@ describe('buildGsArgs', () => {
     const c = a[a.indexOf('-c') + 1]!
     expect(c).toContain('setdistillerparams')
     expect(c.match(/\/QFactor 0\.4\b/g)).toHaveLength(4)
-    // 4:2:0 chroma subsampling — half-resolution colour, full-resolution
-    // luminance. Measured 5-10% smaller for -0.01 dB, i.e. free.
+    // Rung 10 is below the chroma boundary, so colour is subsampled here.
     expect(c.match(/\/HSamples \[2 1 1 1\]/g)).toHaveLength(4)
     expect(c.match(/\/VSamples \[2 1 1 1\]/g)).toHaveLength(4)
     for (const key of ['ColorACSImageDict', 'ColorImageDict', 'GrayACSImageDict', 'GrayImageDict']) {
       expect(c).toContain(key)
+    }
+  })
+
+  it('keeps full chroma on the rungs labelled high quality', () => {
+    // 4:2:0 costs ~49% more error on saturated fine detail (stamps, rules,
+    // signatures). "High quality" is a promise to the user; rungs 1-8 keep
+    // full colour resolution and only rungs 9+ trade it away.
+    for (let i = 1; i <= 8; i++) {
+      const c = args(i)[args(i).indexOf('-c') + 1]!
+      expect(c, `rung ${i} is labelled high quality but subsamples chroma`)
+        .toContain('/HSamples [1 1 1 1]')
+    }
+    for (let i = 9; i <= MAX_INDEX; i++) {
+      const c = args(i)[args(i).indexOf('-c') + 1]!
+      expect(c, `rung ${i} should subsample chroma`).toContain('/HSamples [2 1 1 1]')
     }
   })
 
@@ -706,21 +720,29 @@ const BASE_ARGS = [
   '-dEmbedAllFonts=true',
 ]
 
-function distillerParams(qFactor: number): string {
-  // HSamples/VSamples [2 1 1 1] is 4:2:0 chroma subsampling: colour is stored
-  // at half resolution while brightness stays full. Human vision resolves
-  // colour far more coarsely than luminance, so this is close to free.
-  //
-  // Measured on a 300 DPI colour scan, holding DPI and QFactor fixed:
-  //   rung  5  1,442,462 -> 1,363,051 bytes  (5.5% smaller, -0.01 dB)
-  //   rung  7    598,611 ->   559,377 bytes  (6.6% smaller, -0.01 dB)
-  //   rung 10    271,251 ->   250,643 bytes  (7.6% smaller, -0.01 dB)
-  //   rung 11    149,553 ->   133,866 bytes (10.5% smaller, -0.01 dB)
-  //
-  // -0.01 dB is measurement noise. This matters because it shifts the whole
-  // size/quality frontier: for a given target, the search now settles on a
-  // gentler rung, so images keep more detail at the same file size.
-  const dict = `<</QFactor ${qFactor} /Blend 1 /HSamples [2 1 1 1] /VSamples [2 1 1 1]>>`
+/**
+ * Rungs at and below this index subsample chroma 4:2:0 — colour stored at half
+ * resolution, brightness untouched.
+ *
+ * This is NOT free, despite an earlier claim in this file that it was. That
+ * claim came from measuring against smooth colour, which cannot show the
+ * damage. Measured properly against a page with saturated *fine* detail — 2px
+ * red stamp strokes, 1px blue rules — at rung 10:
+ *
+ *   4:4:4   533,412 bytes   mean error on saturated pixels 22.60
+ *   4:2:0   364,638 bytes   mean error on saturated pixels 33.72
+ *
+ * 32% smaller for 49% more colour error, concentrated exactly on the content a
+ * document compressor exists to protect: stamps, highlighter, signatures,
+ * coloured rules, charts. So it is applied only from the rung where the label
+ * already tells the user quality has been reduced. Rungs 1-8 are labelled
+ * "high quality" and keep full chroma, because that label is a promise.
+ */
+const CHROMA_SUBSAMPLE_FROM = 9
+
+function distillerParams(qFactor: number, subsampleChroma: boolean): string {
+  const s = subsampleChroma ? '[2 1 1 1]' : '[1 1 1 1]'
+  const dict = `<</QFactor ${qFactor} /Blend 1 /HSamples ${s} /VSamples ${s}>>`
   return (
     `<</ColorACSImageDict ${dict} /ColorImageDict ${dict}` +
     ` /GrayACSImageDict ${dict} /GrayImageDict ${dict}>> setdistillerparams`
@@ -785,7 +807,7 @@ export function buildGsArgs(rung: Rung, inputPath: string, outputPath: string): 
     // "rangecheck in .putdeviceprops".)
     `-sOutputFile=${outputPath}`,
     '-c',
-    distillerParams(rung.qFactor),
+    distillerParams(rung.qFactor, rung.index >= CHROMA_SUBSAMPLE_FROM),
     '-f',
     inputPath,
   ]
