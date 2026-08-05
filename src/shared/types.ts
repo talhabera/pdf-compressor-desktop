@@ -4,7 +4,6 @@ export interface Rung {
   dpi: number | null
   /** Ghostscript JPEG QFactor. Higher is worse. `null` on rung 0. */
   qFactor: number | null
-  grayscale: boolean
   /** Plain-language quality description shown to the user. */
   label: string
 }

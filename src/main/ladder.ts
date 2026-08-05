@@ -11,22 +11,22 @@ const HEAVY = 'heavily compressed'
 const EXTREME = 'extremely compressed'
 
 export const RUNGS: readonly Rung[] = [
-  { index: 0, dpi: null, qFactor: null, grayscale: false, label: 'original quality' },
-  { index: 1, dpi: 250, qFactor: 0.15, grayscale: false, label: HIGH },
-  { index: 2, dpi: 220, qFactor: 0.2, grayscale: false, label: HIGH },
-  { index: 3, dpi: 200, qFactor: 0.25, grayscale: false, label: HIGH },
-  { index: 4, dpi: 180, qFactor: 0.3, grayscale: false, label: HIGH },
-  { index: 5, dpi: 150, qFactor: 0.4, grayscale: false, label: REDUCED },
-  { index: 6, dpi: 130, qFactor: 0.5, grayscale: false, label: REDUCED },
-  { index: 7, dpi: 110, qFactor: 0.65, grayscale: false, label: REDUCED },
-  { index: 8, dpi: 100, qFactor: 0.8, grayscale: false, label: REDUCED },
-  { index: 9, dpi: 90, qFactor: 1.0, grayscale: false, label: HEAVY },
-  { index: 10, dpi: 80, qFactor: 1.3, grayscale: false, label: HEAVY },
-  { index: 11, dpi: 72, qFactor: 2.0, grayscale: true, label: HEAVY },
-  { index: 12, dpi: 60, qFactor: 2.4, grayscale: true, label: EXTREME },
-  { index: 13, dpi: 50, qFactor: 3.0, grayscale: true, label: EXTREME },
-  { index: 14, dpi: 40, qFactor: 3.5, grayscale: true, label: EXTREME },
-  { index: 15, dpi: 30, qFactor: 4.0, grayscale: true, label: EXTREME },
+  { index: 0, dpi: null, qFactor: null, label: 'original quality' },
+  { index: 1, dpi: 250, qFactor: 0.15, label: HIGH },
+  { index: 2, dpi: 220, qFactor: 0.2, label: HIGH },
+  { index: 3, dpi: 200, qFactor: 0.25, label: HIGH },
+  { index: 4, dpi: 180, qFactor: 0.3, label: HIGH },
+  { index: 5, dpi: 150, qFactor: 0.4, label: REDUCED },
+  { index: 6, dpi: 130, qFactor: 0.5, label: REDUCED },
+  { index: 7, dpi: 110, qFactor: 0.65, label: REDUCED },
+  { index: 8, dpi: 100, qFactor: 0.8, label: REDUCED },
+  { index: 9, dpi: 90, qFactor: 1.0, label: HEAVY },
+  { index: 10, dpi: 80, qFactor: 1.3, label: HEAVY },
+  { index: 11, dpi: 72, qFactor: 2.0, label: HEAVY },
+  { index: 12, dpi: 60, qFactor: 2.4, label: EXTREME },
+  { index: 13, dpi: 50, qFactor: 3.0, label: EXTREME },
+  { index: 14, dpi: 40, qFactor: 3.5, label: EXTREME },
+  { index: 15, dpi: 30, qFactor: 4.0, label: EXTREME },
 ]
 
 const BASE_ARGS = [
@@ -101,10 +101,12 @@ export function buildGsArgs(rung: Rung, inputPath: string, outputPath: string): 
     '-dColorImageFilter=/DCTEncode',
     '-dAutoFilterGrayImages=false',
     '-dGrayImageFilter=/DCTEncode',
-    // Do NOT add -dProcessColorModel=/DeviceGray here. It is a raster-device
-    // parameter; pdfwrite rejects it with "Unrecoverable error: rangecheck in
-    // .putdeviceprops", which kills every rung from the readability floor down.
-    ...(rung.grayscale ? ['-sColorConversionStrategy=Gray'] : []),
+    // No colour conversion at any rung. Turning a colour document black and
+    // white is a change to its content, not a reduction in quality, and the
+    // app must never make that decision on the user's behalf. (Also note
+    // -dProcessColorModel=/DeviceGray must never be added here: it is a
+    // raster-device parameter and pdfwrite rejects it outright with
+    // "rangecheck in .putdeviceprops".)
     `-sOutputFile=${outputPath}`,
     '-c',
     distillerParams(rung.qFactor),

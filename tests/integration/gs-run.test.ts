@@ -85,8 +85,7 @@ describe('makeRungRunner', () => {
   // The spec promises text is never rasterized at ANY rung. The one plausible
   // way Ghostscript could break that promise is colour conversion across a
   // transparency group, which can force local flattening of that region.
-  // Rungs 11+ convert to grayscale, so that is exactly where to look.
-  it('keeps text selectable through grayscale conversion of a transparency group', async () => {
+  it('keeps text selectable without converting to grayscale at harsh rungs', async () => {
     const { PDFDocument, StandardFonts, rgb } = await import('pdf-lib')
     const doc = await PDFDocument.create()
     const font = await doc.embedFont(StandardFonts.Helvetica)
@@ -114,6 +113,74 @@ describe('makeRungRunner', () => {
         .toContain('TRANSPARENCY_GROUP_SENTINEL')
       expect(text, `rung ${index} lost the opaque text`)
         .toContain('OPAQUE_CONTROL_SENTINEL')
+    }
+  })
+
+  it('preserves colour saturation through all rungs, even the harshest', async () => {
+    // An earlier ladder converted to grayscale at the floor, making scanned
+    // forms, signatures and charts come back black and white. This test catches
+    // that regression: build a PDF with saturated colours, compress it at both
+    // FLOOR_INDEX and MAX_INDEX, render to PPM, and measure the average colour
+    // spread (max(R,G,B) - min(R,G,B)). Saturated red/green/blue stays well
+    // above ~20; grayscale measures ~0.1.
+    const { PDFDocument, rgb } = await import('pdf-lib')
+    const doc = await PDFDocument.create()
+    const page = doc.addPage([200, 200])
+
+    // Draw saturated color blocks: red, green, blue
+    page.drawRectangle({ x: 10, y: 130, width: 50, height: 50, color: rgb(1, 0, 0) })
+    page.drawRectangle({ x: 70, y: 130, width: 50, height: 50, color: rgb(0, 1, 0) })
+    page.drawRectangle({ x: 130, y: 130, width: 50, height: 50, color: rgb(0, 0, 1) })
+
+    const src = join(work, 'colour-saturation.pdf')
+    writeFileSync(src, await doc.save())
+
+    const run = makeRungRunner({ gsPath: GS, inputPath: src, workDir: work })
+
+    for (const index of [FLOOR_INDEX, MAX_INDEX]) {
+      const result = await run(RUNGS[index]!)
+      const ppmPath = join(work, `colour-${index}.ppm`)
+
+      // Render to PPM at low resolution (6 DPI is enough for the colour blocks)
+      execFileSync(GS, [
+        '-sDEVICE=ppmraw',
+        '-r6',
+        '-dNOPAUSE',
+        '-dBATCH',
+        '-dQUIET',
+        `-sOutputFile=${ppmPath}`,
+        '-f',
+        result.path,
+      ])
+
+      // Parse PPM header and pixel data
+      const ppmData = execFileSync('file', [ppmPath], { encoding: 'utf8' })
+      expect(ppmData).toMatch(/PPM|Netpbm.*image data/)
+
+      // Read raw PPM file and extract RGB values
+      const ppmBuffer = execFileSync('tail', ['-c', '+30', ppmPath], { encoding: 'binary' })
+      const pixels: number[] = []
+
+      for (let i = 0; i < ppmBuffer.length; i++) {
+        pixels.push(ppmBuffer.charCodeAt(i))
+      }
+
+      // Calculate average colour spread across pixels
+      let totalSpread = 0
+      let pixelCount = 0
+
+      for (let i = 0; i + 2 < pixels.length; i += 3) {
+        const r = pixels[i]!
+        const g = pixels[i + 1]!
+        const b = pixels[i + 2]!
+        const spread = Math.max(r, g, b) - Math.min(r, g, b)
+        totalSpread += spread
+        pixelCount++
+      }
+
+      const avgSpread = totalSpread / pixelCount
+      expect(avgSpread, `rung ${index} converted to grayscale (spread too low)`)
+        .toBeGreaterThan(20)
     }
   })
 })

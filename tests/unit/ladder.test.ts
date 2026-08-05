@@ -16,7 +16,6 @@ describe('RUNGS', () => {
   it('has a structural-only rung 0 with no image settings', () => {
     expect(RUNGS[0]!.dpi).toBeNull()
     expect(RUNGS[0]!.qFactor).toBeNull()
-    expect(RUNGS[0]!.grayscale).toBe(false)
   })
 
   it('decreases DPI monotonically from rung 1 down', () => {
@@ -31,10 +30,14 @@ describe('RUNGS', () => {
     }
   })
 
-  it('turns on grayscale at the floor and keeps it on below', () => {
-    expect(RUNGS[FLOOR_INDEX - 1]!.grayscale).toBe(false)
-    for (let i = FLOOR_INDEX; i <= MAX_INDEX; i++) {
-      expect(RUNGS[i]!.grayscale).toBe(true)
+  it('never converts colour to grayscale at any rung', () => {
+    // Turning a colour document black and white changes its content, not its
+    // quality. An earlier ladder did this from the floor down; it made scanned
+    // forms, signatures and charts come back monochrome without being asked.
+    const args = (i: number) => buildGsArgs(RUNGS[i]!, '/in.pdf', '/out.pdf')
+    for (let i = 0; i <= MAX_INDEX; i++) {
+      expect(args(i).join(' ')).not.toContain('ColorConversionStrategy')
+      expect(args(i).join(' ')).not.toContain('DeviceGray')
     }
   })
 
@@ -113,10 +116,6 @@ describe('buildGsArgs', () => {
     }
   })
 
-  it('converts to grayscale only at and below the floor', () => {
-    expect(args(10)).not.toContain('-sColorConversionStrategy=Gray')
-    expect(args(11)).toContain('-sColorConversionStrategy=Gray')
-  })
 
   it('never passes -dProcessColorModel, which pdfwrite rejects outright', () => {
     // Ghostscript 10.07 fails with "rangecheck in .putdeviceprops" — this would
