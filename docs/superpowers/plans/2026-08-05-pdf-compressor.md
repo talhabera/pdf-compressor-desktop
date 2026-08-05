@@ -1796,9 +1796,24 @@ git commit -m "feat: run Ghostscript per rung with cancellation and size measure
 
 The stderr patterns must be observed, not guessed. Step 1 observes them.
 
-- [ ] **Step 1: Observe real Ghostscript failure output**
+- [ ] **Step 1: Confirm the recorded Ghostscript failure output**
 
-Create two bad inputs and record exactly what Ghostscript says:
+These strings have already been captured from Ghostscript 10.07.1 on this
+machine, and the patterns in Step 4 are built from them:
+
+| input | stderr |
+|---|---|
+| a text file | `Error: /undefined in this` |
+| a missing path | `Error: /undefinedfilename in (/tmp/does-not-exist.pdf)` |
+| password-protected | `**** This file requires a password for access.` then `**** Error: Couldn't initialise file.` |
+| truncated PDF | `Catalog dictionary not located in file, unable to proceed` then `**** Error: Couldn't initialise file.` |
+
+Note that `Couldn't initialise file.` appears in **both** the encrypted and the
+corrupt cases, which is why the password pattern must be tested first.
+
+Re-run the commands below to confirm they still match on your machine. If any
+output differs, the observed output wins — update both the test and the
+patterns, and say so in your report.
 
 ```bash
 GS=./resources/gs/mac/gs
@@ -1845,13 +1860,26 @@ describe('classifyFailure', () => {
   })
 
   it('recognises a file that is not a readable PDF', () => {
+    // Every string here is real Ghostscript 10.07.1 output, captured by
+    // feeding it a text file, a truncated PDF, and a missing path.
     for (const stderr of [
+      'Error: /undefined in this',
+      'Catalog dictionary not located in file, unable to proceed\n   **** Error: Couldn\'t initialise file.',
       'Error: /syntaxerror in --file--',
       'Unrecoverable error, exit code 1',
-      '**** Cannot recover this file',
     ]) {
       expect(classifyFailure(gsErr(stderr)).kind).toBe('not-pdf')
     }
+  })
+
+  it('reports a password-protected PDF as encrypted, not as corrupt', () => {
+    // Ghostscript prints BOTH "requires a password" and "Couldn't initialise
+    // file." for a locked PDF. If the corrupt pattern were checked first,
+    // every encrypted file would get the wrong message.
+    const real =
+      'GPL Ghostscript 10.07.1: \n   **** This file requires a password for access.\n' +
+      "   **** Error: Couldn't initialise file.\n               Output may be incorrect."
+    expect(classifyFailure(gsErr(real)).kind).toBe('encrypted')
   })
 
   it('recognises a full disk from either Ghostscript or Node', () => {
@@ -1920,11 +1948,23 @@ const MESSAGES: Record<FailureKind, string> = {
   unknown: 'Compression failed on this file.',
 }
 
-// Patterns confirmed against Ghostscript 10.07 output. See Task 7 Step 1.
+// Patterns observed from Ghostscript 10.07.1 itself, not guessed. The exact
+// strings each one targets are recorded in Task 7 Step 1.
+//
+// Order matters: "Couldn't initialise file." appears in BOTH the encrypted and
+// the corrupt cases, so the password check must come first or every locked PDF
+// is reported as corrupt.
 const STDERR_PATTERNS: ReadonlyArray<[RegExp, FailureKind]> = [
+  // "**** This file requires a password for access."
   [/requires a password|invalid password|owner password/i, 'encrypted'],
   [/no space left|disk full/i, 'no-space'],
-  [/syntaxerror|unrecoverable error|cannot recover|not a pdf|undefined in/i, 'not-pdf'],
+  // "Catalog dictionary not located in file, unable to proceed" (truncated),
+  // "Error: /undefined in this" (not a PDF at all),
+  // "Couldn't initialise file." (generic unreadable input).
+  [
+    /catalog dictionary not located|couldn't initialise file|syntaxerror|unrecoverable error|cannot recover|not a pdf|undefined in/i,
+    'not-pdf',
+  ],
 ]
 
 function nodeErrorCode(err: unknown): string | null {
