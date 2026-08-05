@@ -288,7 +288,10 @@ function createWindow(): void {
     show: false,
     titleBarStyle: process.platform === 'darwin' ? 'hiddenInset' : 'default',
     webPreferences: {
-      preload: join(import.meta.dirname, '../preload/index.js'),
+      // .mjs, not .js — electron-vite emits the preload with that extension
+      // under "type": "module". Pointing at .js fails silently: the preload
+      // never loads, and the contextBridge API is simply absent at runtime.
+      preload: join(import.meta.dirname, '../preload/index.mjs'),
       sandbox: false,
       contextIsolation: true,
       nodeIntegration: false,
