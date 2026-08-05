@@ -7,6 +7,7 @@
     "doc": "docs"
   },
   "scripts": {
+    "postinstall": "install-electron",
     "test": "vitest run tests/unit",
     "dev": "electron-vite dev",
     "build": "electron-vite build",
