@@ -104,8 +104,7 @@ npm run pack:win    # release/*.exe
 Both build from macOS with no extra setup — electron-builder cross-packages
 the Windows target directly, no Wine or CI needed.
 
-The macOS build targets **arm64 only**, by design: both current users of this
-app are on Apple Silicon or Windows, and `resources/gs/mac/gs` is a
+The macOS build targets **arm64 only**, because `resources/gs/mac/gs` is a
 single-architecture binary built for the native arch of whatever Mac ran
 `fetch-gs`. Don't change the target to `universal` — it will fail on that
 binary. If an Intel Mac ever needs support, run `fetch-gs` on one and `lipo
@@ -113,11 +112,17 @@ binary. If an Intel Mac ever needs support, run `fetch-gs` on one and `lipo
 
 ### How compression works
 
-Compression is a fixed ladder of 16 quality rungs, each a pair of image DPI
+Compression is a fixed ladder of 27 quality rungs, each a pair of image DPI
 and JPEG QFactor settings, defined in `src/main/ladder.ts`. Rung 0 is
-structural only and loses no image quality. Rung 22 is the *readability floor* — the
-harshest setting applied without the user explicitly asking. Rungs 12–15 are
-reachable only via "Squeeze harder".
+structural only and loses no image quality. Rung 22 is the *readability floor*
+— the harshest setting applied without the user explicitly asking. Rungs 23–26
+are reachable only via "Squeeze harder".
+
+The steps are deliberately fine, 12–19% apart in output size. Step size is
+quality you asked for and didn't get: the search returns the largest result
+that still fits, so a coarse ladder overshoots downward. On a 23.8 MB 300 DPI
+colour scan targeting 1.75 MB, a coarser table returned 1.36 MB at 150 DPI;
+this one returns 1.65 MB at 166 DPI — same target, sharper images.
 
 `src/main/compress.ts` probes rung 0, probes the floor, then binary-searches
 between them for the highest-quality rung whose output actually fits. It only
