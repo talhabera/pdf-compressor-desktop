@@ -60,27 +60,26 @@ rung is a pair of Ghostscript settings: image resolution (DPI) and JPEG quality
 (expressed to Ghostscript as a `QFactor`). Rungs are ordered from gentlest to
 harshest.
 
-| Rung | DPI | JPEG q | QFactor | Notes |
-|---|---|---|---|---|
-| 0 | — | — | — | Structural only: dedupe images, subset fonts, recompress streams. Zero quality loss — achieved by forcing `FlateEncode`, because `pdfwrite`'s `AutoFilter` default silently re-encodes images as lossy JPEG. |
-| 1 | 250 | 90 | 0.15 | |
-| 2 | 220 | 85 | 0.20 | |
-| 3 | 200 | 82 | 0.25 | |
-| 4 | 180 | 80 | 0.30 | |
-| 5 | 150 | 75 | 0.40 | |
-| 6 | 130 | 70 | 0.50 | |
-| 7 | 110 | 65 | 0.65 | |
-| 8 | 100 | 60 | 0.80 | |
-| 9 | 90 | 55 | 1.00 | |
-| 10 | 80 | 50 | 1.30 | |
-| 11 | 72 | 40 | 2.00 | **Readability floor.** |
-| 12 | 60 | 35 | 2.40 | Beyond floor — "Squeeze harder" only |
-| 13 | 50 | 30 | 3.00 | Beyond floor |
-| 14 | 40 | 25 | 3.50 | Beyond floor |
-| 15 | 30 | 20 | 4.00 | Beyond floor |
+| Rung | DPI | QFactor | Notes |
+|---|---|---|---|
+| 0 | — | — | Structural only. Zero quality loss — requires forcing `FlateEncode`, since `pdfwrite`'s `AutoFilter` default silently applies lossy JPEG. |
+| 1–8 | 250 → 166 | 0.15 → 0.34 | high quality |
+| 9–15 | 158 → 110 | 0.37 → 0.65 | reduced image quality |
+| 16–22 | 102 → 72 | 0.72 → 2.00 | heavily compressed; **22 is the readability floor** |
+| 23–26 | 60 → 30 | 2.40 → 4.00 | beyond the floor — "Squeeze harder" only |
 
-Rung 11 is the **readability floor**: the harshest setting the app will apply
-without the user explicitly asking for more. Rungs 12–15 are reachable only via
+The steps are deliberately fine, 12–19% apart in output size. Step size is
+quality the user paid for and did not receive: the search returns the largest
+result that still fits, so a coarse ladder overshoots downward. Measured on a
+23.8 MB 300 DPI colour scan at a 1.75 MB target, a coarser table returned
+1,363,051 bytes (78% of the budget, 150 DPI) where this one returns 1,645,323
+(94%, 166 DPI) — the same file size, visibly sharper images.
+
+JPEG chroma is subsampled 4:2:0 at every rung: colour at half resolution,
+brightness untouched. Measured 5.5–10.5% smaller for −0.01 dB, which is noise.
+
+Rung 22 is the **readability floor**: the harshest setting the app will apply
+without the user explicitly asking for more. Rungs 23–26 are reachable only via
 the "Squeeze harder" button.
 
 Text and vector content is never rasterized at any rung. Ghostscript's `pdfwrite`

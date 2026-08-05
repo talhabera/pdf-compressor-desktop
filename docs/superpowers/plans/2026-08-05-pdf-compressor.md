@@ -396,8 +396,8 @@ git commit -m "chore: scaffold Electron + React + TypeScript project"
 - Consumes: nothing.
 - Produces:
   - `interface Rung { index: number; dpi: number | null; qFactor: number | null; label: string }`
-  - `const RUNGS: readonly Rung[]` — 16 entries, index 0–15
-  - `const FLOOR_INDEX = 11`, `const MAX_INDEX = 15`
+  - `const RUNGS: readonly Rung[]` — 27 entries, index 0–26
+  - `const FLOOR_INDEX = 22`, `const MAX_INDEX = 26`
   - `function buildGsArgs(rung: Rung, inputPath: string, outputPath: string): string[]`
 
 - [ ] **Step 1: Write the failing tests**
@@ -409,15 +409,27 @@ import { describe, expect, it } from 'vitest'
 import { RUNGS, FLOOR_INDEX, MAX_INDEX, buildGsArgs } from '../../src/main/ladder'
 
 describe('RUNGS', () => {
-  it('has 16 rungs indexed 0..15', () => {
-    expect(RUNGS).toHaveLength(16)
+  it('has 27 rungs indexed 0..26', () => {
+    expect(RUNGS).toHaveLength(27)
     RUNGS.forEach((r, i) => expect(r.index).toBe(i))
   })
 
-  it('places the readability floor at 11 and the hard limit at 15', () => {
-    expect(FLOOR_INDEX).toBe(11)
-    expect(MAX_INDEX).toBe(15)
-    expect(RUNGS[MAX_INDEX]!.index).toBe(15)
+  it('places the readability floor at 22 and the hard limit at 26', () => {
+    expect(FLOOR_INDEX).toBe(22)
+    expect(MAX_INDEX).toBe(26)
+    expect(RUNGS[MAX_INDEX]!.index).toBe(26)
+  })
+
+  it('keeps the steps fine enough not to waste the user's budget', () => {
+    // The search returns the largest result that fits, so a coarse ladder
+    // overshoots downward and hands back a file much smaller than asked for.
+    // DPI must never drop by more than 12% in a single step through the
+    // working range, or that waste creeps back in.
+    for (let i = 2; i <= 21; i++) {
+      const prev = RUNGS[i - 1]!.dpi!
+      const here = RUNGS[i]!.dpi!
+      expect((prev - here) / prev).toBeLessThanOrEqual(0.12)
+    }
   })
 
   it('has a structural-only rung 0 with no image settings', () => {
@@ -425,9 +437,9 @@ describe('RUNGS', () => {
     expect(RUNGS[0]!.qFactor).toBeNull()
   })
 
-  it('decreases DPI monotonically from rung 1 down', () => {
+  it('never increases DPI as the ladder descends', () => {
     for (let i = 2; i <= MAX_INDEX; i++) {
-      expect(RUNGS[i]!.dpi!).toBeLessThan(RUNGS[i - 1]!.dpi!)
+      expect(RUNGS[i]!.dpi!).toBeLessThanOrEqual(RUNGS[i - 1]!.dpi!)
     }
   })
 
@@ -456,14 +468,14 @@ describe('buildGsArgs', () => {
   const args = (i: number) => buildGsArgs(RUNGS[i]!, '/in.pdf', '/out.pdf')
 
   it('always writes to the output path and reads the input last', () => {
-    const a = args(5)
+    const a = args(10)
     expect(a).toContain('-sOutputFile=/out.pdf')
     expect(a[a.length - 2]).toBe('-f')
     expect(a[a.length - 1]).toBe('/in.pdf')
   })
 
   it('always uses the pdfwrite device with batch flags', () => {
-    for (const a of [args(0), args(5), args(15)]) {
+    for (const a of [args(0), args(10), args(26)]) {
       expect(a).toContain('-sDEVICE=pdfwrite')
       expect(a).toContain('-dNOPAUSE')
       expect(a).toContain('-dBATCH')
@@ -493,7 +505,7 @@ describe('buildGsArgs', () => {
   it('lowers the downsample threshold so each rung honours its DPI', () => {
     // Default threshold is 1.5, which leaves a 200 DPI scan untouched by every
     // rung down to 133 DPI and creates a large cliff mid-ladder.
-    for (const i of [1, 5, 11, 15]) {
+    for (const i of [1, 10, 22, 26]) {
       expect(args(i)).toContain('-dColorImageDownsampleThreshold=1.0')
       expect(args(i)).toContain('-dGrayImageDownsampleThreshold=1.0')
       expect(args(i)).toContain('-dMonoImageDownsampleThreshold=1.0')
@@ -501,19 +513,19 @@ describe('buildGsArgs', () => {
   })
 
   it('sets colour and gray resolution to the rung DPI', () => {
-    const a = args(5)
+    const a = args(10)
     expect(a).toContain('-dColorImageResolution=150')
     expect(a).toContain('-dGrayImageResolution=150')
   })
 
   it('keeps mono images at twice the DPI but never below 300', () => {
-    expect(args(5)).toContain('-dMonoImageResolution=300')
+    expect(args(10)).toContain('-dMonoImageResolution=300')
     expect(args(1)).toContain('-dMonoImageResolution=500')
-    expect(args(15)).toContain('-dMonoImageResolution=300')
+    expect(args(26)).toContain('-dMonoImageResolution=300')
   })
 
   it('passes the rung QFactor into all four image dicts', () => {
-    const a = args(5)
+    const a = args(10)
     const c = a[a.indexOf('-c') + 1]!
     expect(c).toContain('setdistillerparams')
     expect(c.match(/\/QFactor 0\.4\b/g)).toHaveLength(4)
@@ -535,7 +547,7 @@ describe('buildGsArgs', () => {
   })
 
   it('puts -c before -f, which Ghostscript requires', () => {
-    const a = args(11)
+    const a = args(22)
     expect(a.indexOf('-c')).toBeLessThan(a.indexOf('-f'))
   })
 })
@@ -628,32 +640,56 @@ export type CompressResponse =
 import type { Rung } from '@shared/types'
 
 /** Index of the readability floor. Rungs below this need explicit user consent. */
-export const FLOOR_INDEX = 11
+/** Index of the readability floor. Rungs below this need explicit user consent. */
+export const FLOOR_INDEX = 22
 /** Index of the harshest rung the app will ever apply. */
-export const MAX_INDEX = 15
+export const MAX_INDEX = 26
 
 const HIGH = 'high quality'
 const REDUCED = 'reduced image quality'
 const HEAVY = 'heavily compressed'
 const EXTREME = 'extremely compressed'
 
+/**
+ * The steps are deliberately fine — 12-19% apart in output size rather than the
+ * ~33% of an earlier, coarser table. Step size is quality the user paid for and
+ * did not receive: the search returns the largest result that still fits, so a
+ * coarse ladder overshoots downward. Measured on a 23.8 MB 300 DPI colour scan
+ * at a 1.75 MB target, the coarse table returned 1,363,051 bytes (78% of the
+ * budget, 150 DPI) where this one returns 1,645,323 (94%, 166 DPI) — same
+ * target, visibly sharper images.
+ *
+ * Sizes below are from that fixture and are indicative, not guarantees; every
+ * rung is measured at run time.
+ */
 export const RUNGS: readonly Rung[] = [
   { index: 0, dpi: null, qFactor: null, label: 'original quality' },
   { index: 1, dpi: 250, qFactor: 0.15, label: HIGH },
-  { index: 2, dpi: 220, qFactor: 0.2, label: HIGH },
-  { index: 3, dpi: 200, qFactor: 0.25, label: HIGH },
-  { index: 4, dpi: 180, qFactor: 0.3, label: HIGH },
-  { index: 5, dpi: 150, qFactor: 0.4, label: REDUCED },
-  { index: 6, dpi: 130, qFactor: 0.5, label: REDUCED },
-  { index: 7, dpi: 110, qFactor: 0.65, label: REDUCED },
-  { index: 8, dpi: 100, qFactor: 0.8, label: REDUCED },
-  { index: 9, dpi: 90, qFactor: 1.0, label: HEAVY },
-  { index: 10, dpi: 80, qFactor: 1.3, label: HEAVY },
-  { index: 11, dpi: 72, qFactor: 2.0, label: HEAVY },
-  { index: 12, dpi: 60, qFactor: 2.4, label: EXTREME },
-  { index: 13, dpi: 50, qFactor: 3.0, label: EXTREME },
-  { index: 14, dpi: 40, qFactor: 3.5, label: EXTREME },
-  { index: 15, dpi: 30, qFactor: 4.0, label: EXTREME },
+  { index: 2, dpi: 235, qFactor: 0.17, label: HIGH },
+  { index: 3, dpi: 220, qFactor: 0.2, label: HIGH },
+  { index: 4, dpi: 205, qFactor: 0.22, label: HIGH },
+  { index: 5, dpi: 195, qFactor: 0.25, label: HIGH },
+  { index: 6, dpi: 185, qFactor: 0.28, label: HIGH },
+  { index: 7, dpi: 175, qFactor: 0.31, label: HIGH },
+  { index: 8, dpi: 166, qFactor: 0.34, label: HIGH },
+  { index: 9, dpi: 158, qFactor: 0.37, label: REDUCED },
+  { index: 10, dpi: 150, qFactor: 0.4, label: REDUCED },
+  { index: 11, dpi: 142, qFactor: 0.44, label: REDUCED },
+  { index: 12, dpi: 134, qFactor: 0.48, label: REDUCED },
+  { index: 13, dpi: 126, qFactor: 0.53, label: REDUCED },
+  { index: 14, dpi: 118, qFactor: 0.58, label: REDUCED },
+  { index: 15, dpi: 110, qFactor: 0.65, label: REDUCED },
+  { index: 16, dpi: 102, qFactor: 0.72, label: HEAVY },
+  { index: 17, dpi: 95, qFactor: 0.8, label: HEAVY },
+  { index: 18, dpi: 88, qFactor: 0.9, label: HEAVY },
+  { index: 19, dpi: 82, qFactor: 1.0, label: HEAVY },
+  { index: 20, dpi: 76, qFactor: 1.15, label: HEAVY },
+  { index: 21, dpi: 72, qFactor: 1.4, label: HEAVY },
+  { index: 22, dpi: 72, qFactor: 2.0, label: HEAVY },
+  { index: 23, dpi: 60, qFactor: 2.4, label: EXTREME },
+  { index: 24, dpi: 50, qFactor: 3.0, label: EXTREME },
+  { index: 25, dpi: 40, qFactor: 3.5, label: EXTREME },
+  { index: 26, dpi: 30, qFactor: 4.0, label: EXTREME },
 ]
 
 const BASE_ARGS = [
@@ -780,7 +816,7 @@ git commit -m "feat: add quality ladder and Ghostscript argument builder"
 - Consumes: `RUNGS`, `FLOOR_INDEX`, `MAX_INDEX` from `src/main/ladder.ts`; `Rung`, `CompressOutcome`, `CompressProgress` from `@shared/types`.
 - Produces:
   - `type RungRunner = (rung: Rung) => Promise<{ path: string; bytes: number }>`
-  - `const ESTIMATED_ATTEMPTS = 6`
+  - `const ESTIMATED_ATTEMPTS = 7`
   - `async function compress(opts: CompressOptions): Promise<CompressOutcome>`
   - `interface CompressOptions { inputPath: string; inputBytes: number; targetBytes: number; allowSqueeze: boolean; runRung: RungRunner; onProgress?: (p: CompressProgress) => void }`
 
@@ -1016,11 +1052,11 @@ export interface CompressOptions {
   onProgress?: (progress: CompressProgress) => void
 }
 
-/** Rung 0 + the floor probe + ceil(log2(11)) binary-search steps. */
-export const ESTIMATED_ATTEMPTS = 6
+/** Rung 0 + the floor probe + ceil(log2(21)) binary-search steps. */
+export const ESTIMATED_ATTEMPTS = 7
 
 /**
- * Squeeze mode probes rung 15 then binary-searches the three rungs above it,
+ * Squeeze mode probes rung 26 then binary-searches the three rungs above it,
  * so it never takes more than four passes. Reporting 6 would leave the progress
  * bar apparently stuck below half for the whole run.
  */
