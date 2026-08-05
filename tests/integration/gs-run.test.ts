@@ -1,5 +1,5 @@
 import { execFileSync } from 'node:child_process'
-import { mkdtempSync, rmSync, statSync, existsSync, writeFileSync } from 'node:fs'
+import { mkdtempSync, rmSync, statSync, existsSync, writeFileSync, readFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
@@ -157,12 +157,25 @@ describe('makeRungRunner', () => {
       const ppmData = execFileSync('file', [ppmPath], { encoding: 'utf8' })
       expect(ppmData).toMatch(/PPM|Netpbm.*image data/)
 
-      // Read raw PPM file and extract RGB values
-      const ppmBuffer = execFileSync('tail', ['-c', '+30', ppmPath], { encoding: 'binary' })
-      const pixels: number[] = []
+      // Read raw PPM file and parse header properly
+      const ppmBuffer = readFileSync(ppmPath)
+      let headerEnd = 0
+      let lines = 0
 
-      for (let i = 0; i < ppmBuffer.length; i++) {
-        pixels.push(ppmBuffer.charCodeAt(i))
+      // PPM format: magic (P6 or P5), whitespace, width, whitespace, height, whitespace, maxval, then binary data
+      for (let i = 0; i < ppmBuffer.length && lines < 4; i++) {
+        if (ppmBuffer[i] === 10) { // newline character
+          lines++
+          if (lines === 4) {
+            headerEnd = i + 1
+            break
+          }
+        }
+      }
+
+      const pixels: number[] = []
+      for (let i = headerEnd; i < ppmBuffer.length; i++) {
+        pixels.push(ppmBuffer[i]!)
       }
 
       // Calculate average colour spread across pixels

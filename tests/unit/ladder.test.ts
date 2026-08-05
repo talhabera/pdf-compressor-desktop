@@ -120,15 +120,30 @@ describe('buildGsArgs', () => {
     expect(args(26)).toContain('-dMonoImageResolution=300')
   })
 
-  it('passes the rung QFactor into all four image dicts with 4:2:0 chroma subsampling', () => {
+  it('passes the rung QFactor into all four image dicts', () => {
     const a = args(10)
     const c = a[a.indexOf('-c') + 1]!
     expect(c).toContain('setdistillerparams')
     expect(c.match(/\/QFactor 0\.4\b/g)).toHaveLength(4)
-    expect(c.match(/\/HSamples \[2 1 1 1\]/g)).toHaveLength(4)
-    expect(c.match(/\/VSamples \[2 1 1 1\]/g)).toHaveLength(4)
     for (const key of ['ColorACSImageDict', 'ColorImageDict', 'GrayACSImageDict', 'GrayImageDict']) {
       expect(c).toContain(key)
+    }
+  })
+
+  it('applies 4:2:0 chroma subsampling only on rungs 9-26 (reduced quality and below)', () => {
+    // Rungs 1-8 ("high quality") keep full chroma [1 1 1 1]
+    for (const i of [1, 2, 8]) {
+      const c = args(i)[args(i).indexOf('-c') + 1]!
+      expect(c.match(/\/HSamples \[1 1 1 1\]/g)).toHaveLength(4)
+      expect(c.match(/\/VSamples \[1 1 1 1\]/g)).toHaveLength(4)
+      expect(c).not.toContain('[2 1 1 1]')
+    }
+    // Rungs 9-26 (reduced quality and worse) subsample chroma [2 1 1 1]
+    for (const i of [9, 10, 15, 22, 26]) {
+      const c = args(i)[args(i).indexOf('-c') + 1]!
+      expect(c.match(/\/HSamples \[2 1 1 1\]/g)).toHaveLength(4)
+      expect(c.match(/\/VSamples \[2 1 1 1\]/g)).toHaveLength(4)
+      expect(c).not.toContain('[1 1 1 1]')
     }
   })
 
