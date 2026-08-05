@@ -43,15 +43,21 @@ export async function compress(opts: CompressOptions): Promise<CompressOutcome> 
 
     const rung = RUNGS[index]!
     attempts++
-    onProgress?.({
+    // Each attempt reports twice: once on start so the UI can say what is
+    // being tried during a pass that may take several seconds, and once on
+    // completion carrying the measured size. The completion event is the only
+    // place an intermediate attempt's real size is ever available.
+    const event = {
       attempt: attempts,
       estimatedTotal: allowSqueeze ? ESTIMATED_SQUEEZE_ATTEMPTS : ESTIMATED_ATTEMPTS,
       rungIndex: index,
       rungLabel: rung.label,
       dpi: rung.dpi,
-    })
+    }
+    onProgress?.({ ...event, bytes: null })
     const result = await runRung(rung)
     measured.set(index, result)
+    onProgress?.({ ...event, bytes: result.bytes })
     return result
   }
 

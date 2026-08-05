@@ -21,6 +21,8 @@ export interface CompressProgress {
   rungIndex: number
   rungLabel: string
   dpi: number | null
+  /** Measured file size in bytes. `null` while the rung is in progress; populated when complete. */
+  bytes: number | null
 }
 
 export interface CompressOutcome {

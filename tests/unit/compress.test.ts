@@ -150,18 +150,40 @@ describe('compress', () => {
     expect(outcome.outputPath).toBe(`/tmp/rung-${outcome.rungIndex}.pdf`)
   })
 
-  it('reports progress for every rung it actually runs', async () => {
+  it('reports progress twice per rung: once starting, once measured', async () => {
     const onProgress = vi.fn()
     const { run, calls } = fakeRunner(curve(10_000_000, 500_000))
     await compress({
       ...base, inputBytes: 12_000_000, targetBytes: 7_200_000, runRung: run, onProgress,
     })
-    expect(onProgress).toHaveBeenCalledTimes(calls.length)
+    expect(onProgress).toHaveBeenCalledTimes(calls.length * 2)
+
     const first = onProgress.mock.calls[0]![0]
     expect(first.attempt).toBe(1)
     expect(first.rungIndex).toBe(0)
     expect(first.estimatedTotal).toBeGreaterThan(0)
     expect(first.rungLabel).toBe(RUNGS[0]!.label)
+    expect(first.bytes).toBeNull()
+
+    const second = onProgress.mock.calls[1]![0]
+    expect(second.attempt).toBe(1)
+    expect(second.rungIndex).toBe(0)
+    expect(second.bytes).toBe(10_000_000)
+  })
+
+  it('never reports a size it did not measure', async () => {
+    // Every populated `bytes` must equal what the runner actually returned for
+    // that rung. A progress display showing inferred sizes as measurements
+    // would be worse than showing none.
+    const onProgress = vi.fn()
+    const sizes = curve(10_000_000, 500_000)
+    const { run } = fakeRunner(sizes)
+    await compress({
+      ...base, inputBytes: 12_000_000, targetBytes: 7_200_000, runRung: run, onProgress,
+    })
+    for (const [event] of onProgress.mock.calls) {
+      if (event.bytes !== null) expect(event.bytes).toBe(sizes[event.rungIndex])
+    }
   })
 
   it('correctly handles a spike in the binary search path', async () => {
