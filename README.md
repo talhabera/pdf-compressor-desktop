@@ -101,24 +101,31 @@ between them for the highest-quality rung whose output actually fits. It only
 ever returns a file whose size it measured, so a non-monotonic ladder can cost
 quality but can never miss the target.
 
-Text is never rasterized at any rung. Ghostscript re-encodes embedded images
-only; text stays selectable and searchable in the output.
+Two guarantees the app makes about your document, at every rung including the
+harshest:
 
-### If the macOS Ghostscript build fails
+- **Text is never rasterized.** Ghostscript re-encodes embedded images only;
+  text stays selectable and searchable in the output.
+- **Colour is never discarded.** The app does not convert documents to
+  grayscale. Compression lowers image resolution and JPEG quality; it does not
+  change what the document *is*. If a target is only reachable by throwing away
+  colour, the app reports the smallest size it can safely manage instead.
 
-`scripts/fetch-ghostscript.sh` builds Ghostscript from source so the binary
-depends only on system libraries. If the cross-architecture build fails, the
-script falls back to a single-architecture binary and warns you.
+### About the Ghostscript build
 
-The other option is to bundle Homebrew's Ghostscript with its dependencies:
+`scripts/fetch-ghostscript.sh` builds Ghostscript from source for the native
+architecture of whatever Mac runs it, and refuses to install the result unless
+`otool -L` shows it linking nothing outside `/usr/lib` and `/System`.
 
-```bash
-brew install ghostscript dylibbundler
-cp "$(brew --prefix)/bin/gs" resources/gs/mac/gs
-dylibbundler -od -b -x resources/gs/mac/gs -d resources/gs/mac/libs \
-             -p @executable_path/libs
-otool -L resources/gs/mac/gs   # must show no /opt/homebrew paths
-```
+That gate is not ceremony. It has already caught two real failures: Ghostscript's
+`configure` autodetected Homebrew's `libidn` and `fontconfig` and linked them,
+either of which would have produced a binary that ran perfectly on the build
+machine and failed on every other computer — surfacing as an inscrutable
+"library not loaded" error only after packaging and installation. The build now
+runs with a sanitised `PATH` so Homebrew is not discoverable at all.
+
+If the build fails, read the actual error rather than working around the gate.
+Copying Homebrew's `gs` into place will not work: the gate rejects it, correctly.
 
 ## Licence
 
