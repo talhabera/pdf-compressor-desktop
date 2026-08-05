@@ -517,6 +517,10 @@ describe('buildGsArgs', () => {
     const c = a[a.indexOf('-c') + 1]!
     expect(c).toContain('setdistillerparams')
     expect(c.match(/\/QFactor 0\.4\b/g)).toHaveLength(4)
+    // 4:2:0 chroma subsampling — half-resolution colour, full-resolution
+    // luminance. Measured 5-10% smaller for -0.01 dB, i.e. free.
+    expect(c.match(/\/HSamples \[2 1 1 1\]/g)).toHaveLength(4)
+    expect(c.match(/\/VSamples \[2 1 1 1\]/g)).toHaveLength(4)
     for (const key of ['ColorACSImageDict', 'ColorImageDict', 'GrayACSImageDict', 'GrayImageDict']) {
       expect(c).toContain(key)
     }
@@ -667,7 +671,20 @@ const BASE_ARGS = [
 ]
 
 function distillerParams(qFactor: number): string {
-  const dict = `<</QFactor ${qFactor} /Blend 1 /HSamples [1 1 1 1] /VSamples [1 1 1 1]>>`
+  // HSamples/VSamples [2 1 1 1] is 4:2:0 chroma subsampling: colour is stored
+  // at half resolution while brightness stays full. Human vision resolves
+  // colour far more coarsely than luminance, so this is close to free.
+  //
+  // Measured on a 300 DPI colour scan, holding DPI and QFactor fixed:
+  //   rung  5  1,442,462 -> 1,363,051 bytes  (5.5% smaller, -0.01 dB)
+  //   rung  7    598,611 ->   559,377 bytes  (6.6% smaller, -0.01 dB)
+  //   rung 10    271,251 ->   250,643 bytes  (7.6% smaller, -0.01 dB)
+  //   rung 11    149,553 ->   133,866 bytes (10.5% smaller, -0.01 dB)
+  //
+  // -0.01 dB is measurement noise. This matters because it shifts the whole
+  // size/quality frontier: for a given target, the search now settles on a
+  // gentler rung, so images keep more detail at the same file size.
+  const dict = `<</QFactor ${qFactor} /Blend 1 /HSamples [2 1 1 1] /VSamples [2 1 1 1]>>`
   return (
     `<</ColorACSImageDict ${dict} /ColorImageDict ${dict}` +
     ` /GrayACSImageDict ${dict} /GrayImageDict ${dict}>> setdistillerparams`
