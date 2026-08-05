@@ -1157,10 +1157,21 @@ tar xf "${SRC_TGZ}" -C "${WORK}/src" --strip-components=1
 # run this script on one and `lipo -create` the two binaries together.
 NATIVE_ARCH="$(uname -m)"
 say "  building ${NATIVE_ARCH}"
+# The build runs with a sanitised PATH so Homebrew's pkg-config is never found.
+# Without this, configure autodetects Homebrew libraries and links them: an
+# earlier build picked up /opt/homebrew/.../libidn.12.dylib, producing a binary
+# that ran perfectly on the build machine and would fail everywhere else.
+# libidn only provides Unicode-password support for encrypted PDFs, which this
+# app reports as an error rather than decrypting, so we do not want it at all.
+# Ghostscript vendors its own zlib/libpng/jpeg/freetype/lcms2/openjpeg, so
+# hiding the system package manager costs nothing.
 ( cd "${WORK}/src"
+  export PATH="/usr/bin:/bin:/usr/sbin:/sbin"
+  unset PKG_CONFIG_PATH PKG_CONFIG_LIBDIR CPPFLAGS LDFLAGS
   make distclean >/dev/null 2>&1 || true
   ./configure --without-x --disable-cups --disable-dbus \
-              --disable-gtk --without-tesseract >/dev/null
+              --disable-gtk --without-tesseract \
+              --without-libidn --without-libpaper >/dev/null
   make -j"$(sysctl -n hw.ncpu)" >/dev/null
   cp bin/gs "${ROOT}/resources/gs/mac/gs" )
 
@@ -1174,6 +1185,18 @@ otool -L "${ROOT}/resources/gs/mac/gs" | tail -n +2
 echo
 echo "Every line above must be under /usr/lib or /System. Anything under"
 echo "/opt/homebrew or /usr/local means the binary is NOT self-contained."
+echo
+
+# Hard gate: refuse to ship a binary that depends on anything outside the OS.
+# This has already caught one real failure (a Homebrew libidn link), so it is
+# an assertion, not a formality.
+if otool -L "${ROOT}/resources/gs/mac/gs" | tail -n +2 \
+     | grep -qvE '^\s+(/usr/lib/|/System/)'; then
+  echo "ERROR: the binary links a non-system library (listed above)."
+  echo "It would run here and fail on every other Mac. Refusing to continue."
+  exit 1
+fi
+echo "OK: binary is self-contained."
 ```
 
 - [ ] **Step 6: Run the fetch script**
