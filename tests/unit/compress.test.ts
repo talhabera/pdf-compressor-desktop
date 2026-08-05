@@ -153,7 +153,7 @@ describe('compress', () => {
 
   it('reports progress twice per rung: once starting, once measured', async () => {
     const onProgress = vi.fn()
-    const { run, calls } = fakeRunner(curve(10_000_000, 500_000))
+    const { run, calls } = fakeRunner(curve(10_000_000, 0.85))
     await compress({
       ...base, inputBytes: 12_000_000, targetBytes: 7_200_000, runRung: run, onProgress,
     })
@@ -177,7 +177,7 @@ describe('compress', () => {
     // that rung. A progress display showing inferred sizes as measurements
     // would be worse than showing none.
     const onProgress = vi.fn()
-    const sizes = curve(10_000_000, 500_000)
+    const sizes = curve(10_000_000, 0.85)
     const { run } = fakeRunner(sizes)
     await compress({
       ...base, inputBytes: 12_000_000, targetBytes: 7_200_000, runRung: run, onProgress,
@@ -188,12 +188,13 @@ describe('compress', () => {
   })
 
   it('correctly handles a spike in the binary search path', async () => {
-    // Probe sequence with expanded ladder (0-26): [0, 22, 11, 5, 8, 9, 10]
-    // Spike at rung 8 is on the path and must not be returned even though it's visited.
+    // Probe sequence with expanded ladder (0-26): [0, 22, 11, 5, 2, 3, 4]
+    // Spike at rung 2 is on the path and must not be returned even though it's visited.
     // Geometric curve with ratio 0.80: each rung is 80% of the previous.
-    // Spike rung 8 to 15M; it must be rejected in favor of a smaller rung that fits.
+    // Rung 2 normally is 12.8M, spike it to 20M so it misses the 9.5M target.
+    // Binary search must then find rung 4 (8.19M) which fits.
     const sizes = curve(20_000_000, 0.80)
-    sizes[8] = 15_000_000
+    sizes[2] = 20_000_000  // Spike larger than neighbors, will miss target
     const { run, calls } = fakeRunner(sizes)
     const outcome = await compress({
       ...base, inputBytes: 25_000_000, targetBytes: 9_500_000, runRung: run,
@@ -201,7 +202,7 @@ describe('compress', () => {
     expect(outcome.status).toBe('hit-target')
     expect(outcome.bytes).toBeLessThanOrEqual(9_500_000)
     expect(outcome.outputPath).toBe(`/tmp/rung-${outcome.rungIndex}.pdf`)
-    expect(calls).toEqual([0, FLOOR_INDEX, 11, 5, 8, 9, 10])
+    expect(calls).toEqual([0, FLOOR_INDEX, 11, 5, 2, 3, 4])
   })
 
   it('propagates runner errors instead of swallowing them', async () => {

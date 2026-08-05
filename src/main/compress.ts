@@ -18,8 +18,8 @@ export interface CompressOptions {
   onProgress?: (progress: CompressProgress) => void
 }
 
-/** Rung 0 + the floor probe + ceil(log2(11)) binary-search steps. */
-export const ESTIMATED_ATTEMPTS = 6
+/** Rung 0 + the floor probe + ceil(log2(21)) binary-search steps. */
+export const ESTIMATED_ATTEMPTS = 7
 
 /**
  * Squeeze mode probes rung 15 and binary-searches only three rungs [12..14],
