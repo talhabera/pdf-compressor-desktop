@@ -2321,6 +2321,28 @@ import { resolveGhostscriptPath } from './gs-locate'
 
 let active: AbortController | null = null
 
+/**
+ * Output path of the most recent successful run, whose temp directory is still
+ * on disk because the user may yet save it.
+ *
+ * `compressFile` deliberately keeps that directory — the caller needs the file.
+ * But a run the user never saves would otherwise leak it, and each one holds
+ * every rung's output: roughly 27 MB for a 13.5 MB input. Someone compressing a
+ * few documents a week and saving only some of them would quietly accumulate
+ * hundreds of megabytes in a directory they will never think to look in.
+ *
+ * So the previous run's directory is removed when a new run starts, and any
+ * outstanding one is removed on quit.
+ */
+let pendingOutputPath: string | null = null
+
+async function discardPendingOutput(): Promise<void> {
+  if (!pendingOutputPath) return
+  const path = pendingOutputPath
+  pendingOutputPath = null
+  await cleanupWorkDir(path)
+}
+
 /** Electron-aware wrapper around the pure resolver in gs-locate.ts. */
 function ghostscriptPath(): string {
   return resolveGhostscriptPath({
@@ -2355,6 +2377,8 @@ export function registerIpc(): void {
 
   ipcMain.handle('compress:start', async (event, req: CompressRequest): Promise<CompressResponse> => {
     active?.abort()
+    // Whatever the last run produced is now superseded, saved or not.
+    await discardPendingOutput()
     const controller = new AbortController()
     active = controller
 
@@ -2370,6 +2394,10 @@ export function registerIpc(): void {
     })
 
     if (active === controller) active = null
+    // Remember what to clean up if the user never saves this result.
+    if (response.ok && response.outcome.outputPath) {
+      pendingOutputPath = response.outcome.outputPath
+    }
     return response
   })
 
@@ -2386,14 +2414,21 @@ export function registerIpc(): void {
     if (result.canceled || !result.filePath) return false
     await copyFile(req.tempPath, result.filePath)
     await cleanupWorkDir(req.tempPath)
+    if (pendingOutputPath === req.tempPath) pendingOutputPath = null
     return true
   })
 }
 
-/** Called on quit so a killed run leaves nothing behind. */
+/**
+ * Called on quit so a killed run leaves nothing behind — neither a running
+ * Ghostscript process nor the temp directory of a result the user never saved.
+ */
 export function abortActiveCompression(): void {
   active?.abort()
   active = null
+  // Fire-and-forget: `before-quit` will not await us, and leaving the directory
+  // is a worse outcome than a slightly delayed deletion.
+  void discardPendingOutput()
 }
 ```
 
