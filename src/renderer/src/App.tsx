@@ -10,6 +10,15 @@ import './styles.css'
 const TARGET_KEY = 'targetMb'
 const DEFAULT_TARGET_MB = 1.75
 
+// The IPC "landed" event for the final attempt and the compress() promise's
+// own resolution are only a few synchronous property accesses apart in the
+// main process, so they routinely arrive close enough together that React
+// batches both updates into one commit — the last tick's render is skipped
+// entirely, jumping straight from N-1 ticks to the result. A short pause
+// here, at least as long as the tick's own fade-in, gives that last
+// measurement its moment on the track before the reveal replaces it.
+const RESULT_REVEAL_DELAY_MS = 260
+
 function loadTarget(): number {
   const stored = Number(localStorage.getItem(TARGET_KEY))
   return Number.isFinite(stored) && stored > 0 ? stored : DEFAULT_TARGET_MB
@@ -65,6 +74,7 @@ export default function App() {
       targetBytes: mbToBytes(targetMb),
       allowSqueeze,
     })
+    await new Promise((r) => setTimeout(r, RESULT_REVEAL_DELAY_MS))
 
     if (res.ok) setOutcome(res.outcome)
     else if (res.failure.kind !== 'cancelled') setFailure(res.failure)
