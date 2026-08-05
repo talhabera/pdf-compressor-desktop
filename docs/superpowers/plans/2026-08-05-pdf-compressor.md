@@ -1151,35 +1151,18 @@ rm -rf "${WORK}/src"
 mkdir -p "${WORK}/src"
 tar xf "${SRC_TGZ}" -C "${WORK}/src" --strip-components=1
 
-build_arch() {
-  local arch="$1"
-  say "  building ${arch}"
-  ( cd "${WORK}/src"
-    make distclean >/dev/null 2>&1 || true
-    ./configure --without-x --disable-cups --disable-dbus \
-                --disable-gtk --without-tesseract \
-                --host="${arch}-apple-darwin" \
-                CC="clang -arch ${arch}" CXX="clang++ -arch ${arch}" >/dev/null
-    make -j"$(sysctl -n hw.ncpu)" >/dev/null
-    cp bin/gs "${WORK}/gs-${arch}" )
-}
-
+# Native arch only. Both users of this app are on Apple Silicon or Windows, so
+# an x86_64 slice would be dead weight — and cross-compiling Ghostscript is the
+# single most fragile step in this build. If an Intel Mac ever needs support,
+# run this script on one and `lipo -create` the two binaries together.
 NATIVE_ARCH="$(uname -m)"
-OTHER_ARCH=$([ "${NATIVE_ARCH}" = "arm64" ] && echo "x86_64" || echo "arm64")
-
-build_arch "${NATIVE_ARCH}"
-
-if build_arch "${OTHER_ARCH}"; then
-  lipo -create -output "${ROOT}/resources/gs/mac/gs" \
-       "${WORK}/gs-${NATIVE_ARCH}" "${WORK}/gs-${OTHER_ARCH}"
-  echo "OK: universal binary"
-else
-  cp "${WORK}/gs-${NATIVE_ARCH}" "${ROOT}/resources/gs/mac/gs"
-  echo "WARNING: the ${OTHER_ARCH} build failed. resources/gs/mac/gs is ${NATIVE_ARCH}-only."
-  echo "The app will not run on ${OTHER_ARCH} Macs. To fix, run this script on an"
-  echo "${OTHER_ARCH} Mac and lipo the two binaries together, or see the dylibbundler"
-  echo "fallback documented in README.md."
-fi
+say "  building ${NATIVE_ARCH}"
+( cd "${WORK}/src"
+  make distclean >/dev/null 2>&1 || true
+  ./configure --without-x --disable-cups --disable-dbus \
+              --disable-gtk --without-tesseract >/dev/null
+  make -j"$(sysctl -n hw.ncpu)" >/dev/null
+  cp bin/gs "${ROOT}/resources/gs/mac/gs" )
 
 chmod +x "${ROOT}/resources/gs/mac/gs"
 
@@ -2695,7 +2678,7 @@ extraResources:
 mac:
   target:
     - target: dmg
-      arch: [universal]
+      arch: [arm64]
   category: public.app-category.utilities
   # Unsigned build. See README for the one-time Gatekeeper step.
   identity: null
@@ -2712,14 +2695,14 @@ nsis:
 - [ ] **Step 2: Build the macOS installer**
 
 Run: `npm run pack:mac`
-Expected: `release/PDF Compressor-0.1.0-universal.dmg` exists.
+Expected: `release/PDF Compressor-0.1.0-arm64.dmg` exists.
 
-If electron-builder errors that the universal target needs both architectures and `resources/gs/mac/gs` is single-architecture, change `arch: [universal]` to `arch: [arm64]` and note in the README that Intel Macs need a separate build.
+The macOS build is **arm64 only** by design — both users of this app are on Apple Silicon or Windows. Do not switch this to `universal`: `resources/gs/mac/gs` is a single-architecture binary and a universal target would fail on it.
 
 - [ ] **Step 3: Verify Ghostscript survived packaging**
 
 ```bash
-hdiutil attach "release/PDF Compressor-0.1.0-universal.dmg"
+hdiutil attach "release/PDF Compressor-0.1.0-arm64.dmg"
 ls -la "/Volumes/PDF Compressor/PDF Compressor.app/Contents/Resources/gs/"
 "/Volumes/PDF Compressor/PDF Compressor.app/Contents/Resources/gs/gs" --version
 hdiutil detach "/Volumes/PDF Compressor"

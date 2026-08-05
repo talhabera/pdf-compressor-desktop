@@ -269,10 +269,14 @@ lcms2, and openjpeg, so a default build links nothing external:
 make
 ```
 
-Build separately for `arm64` and `x86_64`, combine with `lipo` into a universal
-binary, and verify with `otool -L` that only system libraries are referenced.
+Build for the **native architecture only** (`arm64`), and verify with `otool -L`
+that only system libraries are referenced. The two users of this app are on
+Apple Silicon and Windows respectively, so an x86_64 slice would be dead weight —
+and cross-compiling Ghostscript is the most fragile step in the whole build. If
+an Intel Mac ever needs support, run the script on one and `lipo -create` the two
+binaries together.
 
-**Contingency.** If the universal build proves troublesome, fall back to bundling
+**Contingency.** If the source build proves troublesome, fall back to bundling
 the Homebrew binary together with its dependencies via `dylibbundler`, which
 rewrites the install names into the app bundle. This is well-trodden but adds
 ~15 MB and more moving parts, so it is the second choice.
@@ -283,8 +287,12 @@ executable on first run if needed.
 
 ## Packaging and installation
 
-`electron-builder` produces a `.dmg` for macOS (universal) and an NSIS `.exe`
+`electron-builder` produces an arm64 `.dmg` for macOS and an NSIS `.exe`
 installer for Windows, both built from macOS.
+
+The Windows installer is the **primary deliverable**: one of the two users runs
+Windows, so a broken `.exe` means the app is unusable for half its audience,
+whereas the macOS build only ever has to satisfy the developer's own machine.
 
 Builds are **unsigned**. On first launch macOS will report that it "cannot check"
 the app; the README will document the one-time right-click → Open workaround with
@@ -319,5 +327,5 @@ macOS user account and a Windows machine, and compress a real document end to en
 ## Open items for implementation
 
 - Validate and tune the `QFactor` table against the fixtures.
-- Confirm the macOS universal Ghostscript build; fall back to `dylibbundler` if needed.
+- Confirm the arm64 macOS Ghostscript source build; fall back to `dylibbundler` if needed.
 - Confirm `electron-builder` produces a working NSIS installer from macOS.
