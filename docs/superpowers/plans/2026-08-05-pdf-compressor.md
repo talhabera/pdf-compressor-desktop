@@ -1535,12 +1535,13 @@ git commit -m "test: add generated PDF fixtures"
 `tests/integration/gs-run.test.ts`:
 
 ```ts
-import { mkdtempSync, rmSync, statSync, existsSync } from 'node:fs'
+import { execFileSync } from 'node:child_process'
+import { mkdtempSync, rmSync, statSync, existsSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 import { GsError, makeRungRunner, runGs } from '../../src/main/gs-run'
-import { RUNGS } from '../../src/main/ladder'
+import { RUNGS, FLOOR_INDEX, MAX_INDEX } from '../../src/main/ladder'
 import { resolveGhostscriptPath } from '../../src/main/gs-locate'
 
 const GS = resolveGhostscriptPath({
@@ -1604,6 +1605,41 @@ describe('makeRungRunner', () => {
     const pending = run(RUNGS[1]!)
     setTimeout(() => controller.abort(), 50)
     await expect(pending).rejects.toThrow()
+  })
+
+  // The spec promises text is never rasterized at ANY rung. The one plausible
+  // way Ghostscript could break that promise is colour conversion across a
+  // transparency group, which can force local flattening of that region.
+  // Rungs 11+ convert to grayscale, so that is exactly where to look.
+  it('keeps text selectable through grayscale conversion of a transparency group', async () => {
+    const { PDFDocument, StandardFonts, rgb } = await import('pdf-lib')
+    const doc = await PDFDocument.create()
+    const font = await doc.embedFont(StandardFonts.Helvetica)
+    const page = doc.addPage([612, 792])
+    // Semi-transparent coloured text: pdf-lib emits an ExtGState with /ca,
+    // which is what creates the transparency group.
+    page.drawText('TRANSPARENCY_GROUP_SENTINEL', {
+      x: 50, y: 700, size: 24, font, color: rgb(0.9, 0.1, 0.1), opacity: 0.5,
+    })
+    page.drawText('OPAQUE_CONTROL_SENTINEL', {
+      x: 50, y: 650, size: 24, font, color: rgb(0, 0, 0),
+    })
+    const src = join(work, 'transparency.pdf')
+    writeFileSync(src, await doc.save())
+
+    const run = makeRungRunner({ gsPath: GS, inputPath: src, workDir: work })
+    for (const index of [FLOOR_INDEX, MAX_INDEX]) {
+      const result = await run(RUNGS[index]!)
+      const text = execFileSync(
+        GS,
+        ['-sDEVICE=txtwrite', '-dNOPAUSE', '-dBATCH', '-dQUIET', '-o', '-', '-f', result.path],
+        { encoding: 'utf8', maxBuffer: 32 * 1024 * 1024 },
+      )
+      expect(text, `rung ${index} lost the transparent text`)
+        .toContain('TRANSPARENCY_GROUP_SENTINEL')
+      expect(text, `rung ${index} lost the opaque text`)
+        .toContain('OPAQUE_CONTROL_SENTINEL')
+    }
   })
 })
 ```
@@ -1697,10 +1733,29 @@ export function makeRungRunner(cfg: RungRunnerConfig): RungRunner {
 Run: `npm run test:integration -- gs-run`
 Expected: PASS, 6 tests. This runs real Ghostscript several times and may take 30–60 seconds.
 
-- [ ] **Step 5: Record the real ladder curve and tune the QFactor table**
+- [ ] **Step 5: Confirm the ladder curve still holds**
 
-This is the empirical check the spec's open items call for. Add this temporary
-test to `tests/integration/gs-run.test.ts`:
+The QFactor table has already been tuned empirically against real Ghostscript
+output, and the spec's open item on it is closed. Measured on
+`tests/fixtures/scan-heavy.pdf` (13,563,981 bytes), the curve is strictly
+monotonic with no inversions:
+
+```
+rung  0  13,133,058   (lossless)   rung  8     312,400
+rung  1   5,927,838                rung  9     201,722
+rung  2   5,352,540                rung 10     124,471
+rung  3   4,342,602                rung 11      56,212  <- floor
+rung  4   2,935,063                rung 12      37,536
+rung  5   1,530,126                rung 13      26,489
+rung  6     890,054                rung 14      18,994
+rung  7     472,627                rung 15      13,935
+```
+
+Your job is to confirm this still holds after your changes, not to re-tune it.
+Add this temporary test, run it, check the numbers are in the same shape, then
+delete it — the ladder-ordering assertions in `tests/unit/ladder.test.ts` guard
+the table from then on. If any rung is *larger* than the one above it, stop and
+report it: that would be a regression against a measured baseline.
 
 ```ts
 it('prints the real ladder curve', async () => {
