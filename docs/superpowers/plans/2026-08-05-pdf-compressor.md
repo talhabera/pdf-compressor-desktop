@@ -1142,9 +1142,9 @@ rm -rf "${WORK}/win-extract"
 cp "${WORK}/win-extract/bin/gswin64c.exe" "${ROOT}/resources/gs/win/"
 cp "${WORK}/win-extract/bin/gsdll64.dll"  "${ROOT}/resources/gs/win/"
 
-# Verify rather than trust the exit code — the p7zip failure mode above exits
-# zero. The real gsdll64.dll is ~25 MB; the bogus plugin DLLs are tiny, so a
-# size floor catches a partial extract precisely.
+# Verify the payload rather than relying on the extractor's exit status. The
+# real gsdll64.dll is ~25 MB; the bogus installer-UI plugin DLLs that a bad
+# extraction produces are a few KB, so a size floor catches it precisely.
 DLL_SIZE=$(stat -f%z "${ROOT}/resources/gs/win/gsdll64.dll" 2>/dev/null || echo 0)
 if [ ! -s "${ROOT}/resources/gs/win/gswin64c.exe" ] || [ "${DLL_SIZE}" -lt 20000000 ]; then
   echo "ERROR: Windows extraction is incomplete (gsdll64.dll is ${DLL_SIZE} bytes,"
