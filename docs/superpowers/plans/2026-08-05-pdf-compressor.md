@@ -1110,7 +1110,7 @@ Expected: PASS, 4 tests.
 # Downloads and prepares the Ghostscript binaries this app bundles.
 # Run once before the first build. Output is gitignored.
 #
-# Prerequisites on macOS:  xcode-select --install ; brew install p7zip
+# Prerequisites on macOS:  xcode-select --install ; brew install sevenzip
 set -euo pipefail
 
 GS_VERSION="10.07.1"
@@ -1132,12 +1132,26 @@ fi
 echo "sha256: $(shasum -a 256 "${WIN_EXE}" | cut -d' ' -f1)"
 echo "Compare against the checksums published at ${BASE%/download/*}/tag/${GS_TAG}"
 
-command -v 7z >/dev/null 2>&1 || { echo "7z not found. Run: brew install p7zip"; exit 1; }
+# Use 7zz from the `sevenzip` formula, NOT `7z` from `p7zip`. p7zip 17.05
+# (2017) cannot read this NSIS installer: it silently extracts only the UI
+# plugin DLLs and reports "Unexpected end of input stream". That failure is
+# especially nasty because the output *looks* present but is wrong.
+command -v 7zz >/dev/null 2>&1 || { echo "7zz not found. Run: brew install sevenzip"; exit 1; }
 rm -rf "${WORK}/win-extract"
-7z x -o"${WORK}/win-extract" "${WIN_EXE}" > /dev/null
+7zz x -aoa -o"${WORK}/win-extract" "${WIN_EXE}" > /dev/null
 cp "${WORK}/win-extract/bin/gswin64c.exe" "${ROOT}/resources/gs/win/"
 cp "${WORK}/win-extract/bin/gsdll64.dll"  "${ROOT}/resources/gs/win/"
-echo "OK: resources/gs/win/"
+
+# Verify rather than trust the exit code — the p7zip failure mode above exits
+# zero. The real gsdll64.dll is ~25 MB; the bogus plugin DLLs are tiny, so a
+# size floor catches a partial extract precisely.
+DLL_SIZE=$(stat -f%z "${ROOT}/resources/gs/win/gsdll64.dll" 2>/dev/null || echo 0)
+if [ ! -s "${ROOT}/resources/gs/win/gswin64c.exe" ] || [ "${DLL_SIZE}" -lt 20000000 ]; then
+  echo "ERROR: Windows extraction is incomplete (gsdll64.dll is ${DLL_SIZE} bytes,"
+  echo "expected ~25 MB). The extractor silently produced the wrong files."
+  exit 1
+fi
+echo "OK: resources/gs/win/ (gsdll64.dll ${DLL_SIZE} bytes)"
 
 # --- macOS: build from source so the binary needs no external libraries -------
 say "macOS binary (building from source)"
@@ -1171,7 +1185,7 @@ say "  building ${NATIVE_ARCH}"
   make distclean >/dev/null 2>&1 || true
   ./configure --without-x --disable-cups --disable-dbus \
               --disable-gtk --without-tesseract \
-              --without-libidn --without-libpaper >/dev/null
+              --disable-fontconfig --without-libidn --without-libpaper >/dev/null
   make -j"$(sysctl -n hw.ncpu)" >/dev/null
   cp bin/gs "${ROOT}/resources/gs/mac/gs" )
 
@@ -2798,11 +2812,13 @@ npm run fixtures    # generates test PDFs
 npm run dev
 ```
 
-`npm run fetch-gs` needs the Xcode command line tools and `p7zip`:
+`npm run fetch-gs` needs the Xcode command line tools and `sevenzip` (the
+`p7zip` formula is too old to read Ghostscript's Windows installer — it extracts
+the wrong files without reporting an error):
 
 ```bash
 xcode-select --install
-brew install p7zip
+brew install sevenzip
 ```
 
 ### Tests
