@@ -53,11 +53,20 @@ function distillerParams(qFactor: number): string {
 
 export function buildGsArgs(rung: Rung, inputPath: string, outputPath: string): string[] {
   if (rung.dpi === null || rung.qFactor === null) {
+    // pdfwrite defaults to AutoFilter, which silently re-encodes images as
+    // lossy JPEG. Forcing FlateEncode is what actually makes this the
+    // zero-quality-loss rung the spec promises. Measured: without these four
+    // flags rung 0 shrank a 13.5 MB fixture to 2.1 MB by discarding image
+    // data while claiming not to; with them it produces 13.1 MB.
     return [
       ...BASE_ARGS,
       '-dDownsampleColorImages=false',
       '-dDownsampleGrayImages=false',
       '-dDownsampleMonoImages=false',
+      '-dAutoFilterColorImages=false',
+      '-dColorImageFilter=/FlateEncode',
+      '-dAutoFilterGrayImages=false',
+      '-dGrayImageFilter=/FlateEncode',
       `-sOutputFile=${outputPath}`,
       '-f',
       inputPath,
@@ -70,6 +79,15 @@ export function buildGsArgs(rung: Rung, inputPath: string, outputPath: string): 
 
   return [
     ...BASE_ARGS,
+    // Ghostscript only downsamples when source/target DPI exceeds this
+    // threshold, which defaults to 1.5. At the default, a 200 DPI scan is
+    // untouched by every rung down to 133 DPI, so the upper ladder varied only
+    // JPEG quality and produced a 4.4x size cliff between rungs 5 and 6.
+    // Setting 1.0 makes each rung actually do what its DPI says: measured,
+    // rung 5 went from 3.89 MB to 1.53 MB on the same input.
+    '-dColorImageDownsampleThreshold=1.0',
+    '-dGrayImageDownsampleThreshold=1.0',
+    '-dMonoImageDownsampleThreshold=1.0',
     '-dDownsampleColorImages=true',
     '-dColorImageDownsampleType=/Bicubic',
     `-dColorImageResolution=${rung.dpi}`,
@@ -83,9 +101,10 @@ export function buildGsArgs(rung: Rung, inputPath: string, outputPath: string): 
     '-dColorImageFilter=/DCTEncode',
     '-dAutoFilterGrayImages=false',
     '-dGrayImageFilter=/DCTEncode',
-    ...(rung.grayscale
-      ? ['-sColorConversionStrategy=Gray', '-dProcessColorModel=/DeviceGray']
-      : []),
+    // Do NOT add -dProcessColorModel=/DeviceGray here. It is a raster-device
+    // parameter; pdfwrite rejects it with "Unrecoverable error: rangecheck in
+    // .putdeviceprops", which kills every rung from the readability floor down.
+    ...(rung.grayscale ? ['-sColorConversionStrategy=Gray'] : []),
     `-sOutputFile=${outputPath}`,
     '-c',
     distillerParams(rung.qFactor),

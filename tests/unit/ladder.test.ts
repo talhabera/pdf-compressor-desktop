@@ -70,6 +70,27 @@ describe('buildGsArgs', () => {
     expect(a).not.toContain('-c')
   })
 
+  it('forces lossless Flate on rung 0 rather than trusting AutoFilter', () => {
+    // pdfwrite's AutoFilter default silently applies lossy JPEG, which would
+    // make rung 0's "zero quality loss" promise untrue.
+    const a = args(0)
+    expect(a).toContain('-dAutoFilterColorImages=false')
+    expect(a).toContain('-dColorImageFilter=/FlateEncode')
+    expect(a).toContain('-dAutoFilterGrayImages=false')
+    expect(a).toContain('-dGrayImageFilter=/FlateEncode')
+    expect(a).not.toContain('-dColorImageFilter=/DCTEncode')
+  })
+
+  it('lowers the downsample threshold so each rung honours its DPI', () => {
+    // Default threshold is 1.5, which leaves a 200 DPI scan untouched by every
+    // rung down to 133 DPI and creates a large cliff mid-ladder.
+    for (const i of [1, 5, 11, 15]) {
+      expect(args(i)).toContain('-dColorImageDownsampleThreshold=1.0')
+      expect(args(i)).toContain('-dGrayImageDownsampleThreshold=1.0')
+      expect(args(i)).toContain('-dMonoImageDownsampleThreshold=1.0')
+    }
+  })
+
   it('sets colour and gray resolution to the rung DPI', () => {
     const a = args(5)
     expect(a).toContain('-dColorImageResolution=150')
@@ -95,7 +116,14 @@ describe('buildGsArgs', () => {
   it('converts to grayscale only at and below the floor', () => {
     expect(args(10)).not.toContain('-sColorConversionStrategy=Gray')
     expect(args(11)).toContain('-sColorConversionStrategy=Gray')
-    expect(args(11)).toContain('-dProcessColorModel=/DeviceGray')
+  })
+
+  it('never passes -dProcessColorModel, which pdfwrite rejects outright', () => {
+    // Ghostscript 10.07 fails with "rangecheck in .putdeviceprops" — this would
+    // kill every rung from the readability floor down.
+    for (let i = 0; i <= MAX_INDEX; i++) {
+      expect(args(i).join(' ')).not.toContain('-dProcessColorModel')
+    }
   })
 
   it('puts -c before -f, which Ghostscript requires', () => {
