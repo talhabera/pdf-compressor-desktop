@@ -1,11 +1,8 @@
 {
   "name": "pdf-compressor-desktop",
   "version": "0.1.0",
-  "description": "",
+  "description": "Compress a PDF to a size you choose",
   "main": "./out/main/index.js",
-  "directories": {
-    "doc": "docs"
-  },
   "scripts": {
     "postinstall": "install-electron",
     "test": "vitest run tests/unit",
@@ -19,8 +16,8 @@
     "pack:win": "npm run build && electron-builder --win"
   },
   "keywords": [],
-  "author": "",
-  "license": "ISC",
+  "author": "talhabera",
+  "license": "UNLICENSED",
   "type": "module",
   "private": true,
   "devDependencies": {

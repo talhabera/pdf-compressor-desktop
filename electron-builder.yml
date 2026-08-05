@@ -1,0 +1,26 @@
+appId: com.talhabera.pdfcompressor
+productName: PDF Compressor
+directories:
+  output: release
+  buildResources: build
+files:
+  - out/**
+  - package.json
+extraResources:
+  - from: resources/gs/${os}
+    to: gs
+    filter: ['**/*']
+mac:
+  target:
+    - target: dmg
+      arch: [arm64]
+  category: public.app-category.utilities
+  identity: null
+win:
+  target:
+    - target: nsis
+      arch: [x64]
+nsis:
+  oneClick: false
+  perMachine: false
+  allowToChangeInstallationDirectory: true
