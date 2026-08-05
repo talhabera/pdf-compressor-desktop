@@ -927,6 +927,23 @@ describe('compress', () => {
     expect(calls.every((c) => c <= FLOOR_INDEX)).toBe(true)
   })
 
+  it('returns the smallest measured file when the target is unreachable', async () => {
+    // Rung 0 is lossless Flate; on text-heavy documents it can beat the floor's
+    // heavy JPEG. Returning the floor there would hand back a file that is both
+    // larger and worse than one already measured and sitting on disk.
+    const sizes: Record<number, number> = {}
+    for (let i = 0; i <= MAX_INDEX; i++) sizes[i] = 5_000_000
+    sizes[0] = 3_000_000            // lossless wins outright
+    sizes[FLOOR_INDEX] = 4_000_000
+    const { run } = fakeRunner(sizes)
+    const outcome = await compress({
+      ...base, inputBytes: 9_000_000, targetBytes: 1_000_000, runRung: run,
+    })
+    expect(outcome.status).toBe('floor-reached')
+    expect(outcome.bytes).toBe(3_000_000)
+    expect(outcome.rungIndex).toBe(0)
+  })
+
   it('reports floor-reached and keeps the floor output when the target is unsafe', async () => {
     // Every rung stays above target.
     const { run, calls } = fakeRunner(curve(50_000_000, 100_000))
@@ -995,7 +1012,7 @@ describe('compress', () => {
       targetBytes: 1_750_000, runRung: run, onProgress,
     })
     for (const call of onProgress.mock.calls) {
-      expect(call[0].estimatedTotal).toBe(4)
+      expect(call[0].estimatedTotal).toBe(3)
     }
   })
 
@@ -1078,11 +1095,11 @@ export interface CompressOptions {
 export const ESTIMATED_ATTEMPTS = 7
 
 /**
- * Squeeze mode probes rung 26 then binary-searches the three rungs above it,
- * so it never takes more than four passes. Reporting 6 would leave the progress
- * bar apparently stuck below half for the whole run.
+ * Squeeze mode probes rung 26 then binary-searches the three rungs above it:
+ * at most three passes, not four. Reporting the normal-mode estimate would
+ * leave the progress bar apparently stuck below half for the whole run.
  */
-export const ESTIMATED_SQUEEZE_ATTEMPTS = 4
+export const ESTIMATED_SQUEEZE_ATTEMPTS = 3
 
 export async function compress(opts: CompressOptions): Promise<CompressOutcome> {
   const { targetBytes, allowSqueeze, runRung, onProgress } = opts
@@ -1147,10 +1164,24 @@ export async function compress(opts: CompressOptions): Promise<CompressOutcome> 
   const lowest = allowSqueeze ? FLOOR_INDEX + 1 : 1
   const harshest = allowSqueeze ? MAX_INDEX : FLOOR_INDEX
 
-  // If the harshest permitted rung still misses, nothing between it and rung 0 can fit.
+  // If the harshest permitted rung still misses, nothing between it and rung 0
+  // can fit — but the harshest rung is not necessarily the *smallest* result we
+  // have. On documents that are not image-dominated, rung 0's lossless Flate
+  // can beat the floor's heavy JPEG: measured on a 200-page text document with
+  // one flat-colour logo, rung 0 = 104,229 bytes against the floor's 104,827.
+  // Returning the floor there would hand the user a file that is both larger
+  // and visibly worse while a better one sits in the same directory.
   const harshestResult = await run(harshest)
   if (harshestResult.bytes > targetBytes) {
-    return done(allowSqueeze ? 'impossible' : 'floor-reached', harshest, harshestResult)
+    let bestIdx = harshest
+    let bestRes = harshestResult
+    for (const [index, result] of measured) {
+      if (result.bytes < bestRes.bytes) {
+        bestIdx = index
+        bestRes = result
+      }
+    }
+    return done(allowSqueeze ? 'impossible' : 'floor-reached', bestIdx, bestRes)
   }
 
   // Binary search for the lowest index (= highest quality) that fits. `best` only

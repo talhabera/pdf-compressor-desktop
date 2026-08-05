@@ -259,7 +259,14 @@ script, `scripts/fetch-ghostscript.sh`, produces them, and the README documents
 running it once before the first build.
 
 **Windows.** Extract `gswin64c.exe` and `gsdll64.dll` from the official Ghostscript
-10.07 Windows release. These are self-contained; no further work is needed.
+10.07 Windows release. These are **not** self-contained: both dynamically link the
+Visual C++ 2015-2022 runtime (VCRUNTIME140.dll, VCRUNTIME140_1.dll, MSVCP140.dll),
+which Windows does not ship. `resources/gs/win/` also bundles the redistributable
+installer (`vcredist_x64.exe`, extracted from the same NSIS package) and
+`build/installer.nsh` runs it silently during setup. Without this, every
+compression fails with an opaque loader error (`STATUS_DLL_NOT_FOUND`) that
+produces no stderr at all — see Task 4's report for the full failure mode and
+`scripts/check-pe-imports.mjs` for the build-time dependency gate that catches it.
 
 **macOS.** Build from the official source tarball so the result depends only on
 system libraries. Ghostscript vendors its own libjpeg, libpng, zlib, freetype,
