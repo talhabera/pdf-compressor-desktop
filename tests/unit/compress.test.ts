@@ -118,6 +118,22 @@ describe('compress', () => {
     expect(outcome.rungIndex).toBe(MAX_INDEX)
   })
 
+  it('reports a smaller attempt estimate in squeeze mode', async () => {
+    // Squeeze searches only four rungs, so reporting the normal-mode estimate
+    // of 6 would leave the progress bar apparently stuck below half throughout.
+    const onProgress = vi.fn()
+    const sizes = curve(50_000_000, 100_000)
+    sizes[15] = 1_000_000
+    const { run } = fakeRunner(sizes)
+    await compress({
+      ...base, allowSqueeze: true, inputBytes: 60_000_000,
+      targetBytes: 1_750_000, runRung: run, onProgress,
+    })
+    for (const call of onProgress.mock.calls) {
+      expect(call[0].estimatedTotal).toBe(4)
+    }
+  })
+
   it('returns a measured under-target file even when the curve is not monotonic', async () => {
     // Pathological: rung 6 is LARGER than rung 5, and rung 3 is tiny.
     const sizes = curve(10_000_000, 400_000)

@@ -21,6 +21,13 @@ export interface CompressOptions {
 /** Rung 0 + the floor probe + ceil(log2(11)) binary-search steps. */
 export const ESTIMATED_ATTEMPTS = 6
 
+/**
+ * Squeeze mode probes rung 15 and binary-searches only three rungs [12..14],
+ * so it never takes more than four passes. Reporting 6 would leave the progress
+ * bar apparently stuck below half for the whole run.
+ */
+export const ESTIMATED_SQUEEZE_ATTEMPTS = 4
+
 export async function compress(opts: CompressOptions): Promise<CompressOutcome> {
   const { targetBytes, allowSqueeze, runRung, onProgress } = opts
 
@@ -38,7 +45,7 @@ export async function compress(opts: CompressOptions): Promise<CompressOutcome> 
     attempts++
     onProgress?.({
       attempt: attempts,
-      estimatedTotal: ESTIMATED_ATTEMPTS,
+      estimatedTotal: allowSqueeze ? ESTIMATED_SQUEEZE_ATTEMPTS : ESTIMATED_ATTEMPTS,
       rungIndex: index,
       rungLabel: rung.label,
       dpi: rung.dpi,
