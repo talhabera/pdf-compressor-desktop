@@ -53,3 +53,35 @@ export interface CompressFailure {
 export type CompressResponse =
   | { ok: true; outcome: CompressOutcome }
   | { ok: false; failure: CompressFailure }
+
+export interface PickedFile {
+  path: string
+  bytes: number
+}
+
+export interface CompressRequest {
+  inputPath: string
+  targetBytes: number
+  allowSqueeze: boolean
+}
+
+export interface RendererApi {
+  pickFile(): Promise<PickedFile | null>
+  statFile(path: string): Promise<PickedFile | null>
+  /**
+   * Absolute path of a dropped File. Electron removed the `File.path` property,
+   * so this must go through `webUtils.getPathForFile` in the preload.
+   */
+  pathForFile(file: File): string
+  compress(req: CompressRequest): Promise<CompressResponse>
+  cancel(): Promise<void>
+  save(req: { tempPath: string; suggestedName: string }): Promise<boolean>
+  /** Returns an unsubscribe function. */
+  onProgress(cb: (progress: CompressProgress) => void): () => void
+}
+
+declare global {
+  interface Window {
+    api: RendererApi
+  }
+}

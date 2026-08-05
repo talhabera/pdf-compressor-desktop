@@ -1,5 +1,6 @@
 import { join } from 'node:path'
 import { app, BrowserWindow, shell } from 'electron'
+import { abortActiveCompression, registerIpc } from './ipc'
 
 function createWindow(): void {
   const win = new BrowserWindow({
@@ -28,11 +29,14 @@ function createWindow(): void {
 }
 
 app.whenReady().then(() => {
+  registerIpc()
   createWindow()
   app.on('activate', () => {
     if (BrowserWindow.getAllWindows().length === 0) createWindow()
   })
 })
+
+app.on('before-quit', abortActiveCompression)
 
 app.on('window-all-closed', () => {
   if (process.platform !== 'darwin') app.quit()
