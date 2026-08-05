@@ -1186,18 +1186,28 @@ echo "Compare against the checksums published at ${BASE%/download/*}/tag/${GS_TA
 command -v 7zz >/dev/null 2>&1 || { echo "7zz not found. Run: brew install sevenzip"; exit 1; }
 rm -rf "${WORK}/win-extract"
 7zz x -aoa -o"${WORK}/win-extract" "${WIN_EXE}" > /dev/null
-cp "${WORK}/win-extract/bin/gswin64c.exe" "${ROOT}/resources/gs/win/"
-cp "${WORK}/win-extract/bin/gsdll64.dll"  "${ROOT}/resources/gs/win/"
+
+# Verify in the extraction directory and install only once it passes. Copying
+# first and checking after would leave files this script just rejected sitting
+# exactly where packaging looks for them — and `exit 1` protects only callers
+# who actually check the exit status.
+SRC_DLL="${WORK}/win-extract/bin/gsdll64.dll"
+SRC_EXE="${WORK}/win-extract/bin/gswin64c.exe"
+[ -f "${SRC_DLL}" ] && [ -f "${SRC_EXE}" ] \
+  || { echo "ERROR: extraction produced no bin/gsdll64.dll and bin/gswin64c.exe."; exit 1; }
 
 # Verify the payload rather than relying on the extractor's exit status. The
 # real gsdll64.dll is ~25 MB; the bogus installer-UI plugin DLLs that a bad
 # extraction produces are a few KB, so a size floor catches it precisely.
-DLL_SIZE=$(stat -f%z "${ROOT}/resources/gs/win/gsdll64.dll" 2>/dev/null || echo 0)
-if [ ! -s "${ROOT}/resources/gs/win/gswin64c.exe" ] || [ "${DLL_SIZE}" -lt 20000000 ]; then
-  echo "ERROR: Windows extraction is incomplete (gsdll64.dll is ${DLL_SIZE} bytes,"
-  echo "expected ~25 MB). The extractor silently produced the wrong files."
+DLL_SIZE=$(stat -f%z "${SRC_DLL}" 2>/dev/null || stat -c%s "${SRC_DLL}")
+if [ "${DLL_SIZE}" -lt $((20 * 1024 * 1024)) ]; then
+  echo "ERROR: gsdll64.dll is only ${DLL_SIZE} bytes (expected ~25 MB)."
+  echo "That is the signature of a partial extraction. Refusing to install."
   exit 1
 fi
+
+cp "${SRC_EXE}" "${ROOT}/resources/gs/win/"
+cp "${SRC_DLL}" "${ROOT}/resources/gs/win/"
 echo "OK: resources/gs/win/ (gsdll64.dll ${DLL_SIZE} bytes)"
 
 # --- macOS: build from source so the binary needs no external libraries -------
@@ -1228,36 +1238,60 @@ say "  building ${NATIVE_ARCH}"
 # hiding the system package manager costs nothing.
 ( cd "${WORK}/src"
   export PATH="/usr/bin:/bin:/usr/sbin:/sbin"
-  unset PKG_CONFIG_PATH PKG_CONFIG_LIBDIR CPPFLAGS LDFLAGS
+  # CC/CXX/CFLAGS are unset too: a shell profile that points CC at a Homebrew
+  # compiler (common advice for keg-only formulas) would reintroduce Homebrew's
+  # default library search paths even with everything else sanitised.
+  unset PKG_CONFIG_PATH PKG_CONFIG_LIBDIR CPPFLAGS LDFLAGS CC CXX CFLAGS
   make distclean >/dev/null 2>&1 || true
   ./configure --without-x --disable-cups --disable-dbus \
               --disable-gtk --without-tesseract \
               --disable-fontconfig --without-libidn --without-libpaper >/dev/null
   make -j"$(sysctl -n hw.ncpu)" >/dev/null
-  cp bin/gs "${ROOT}/resources/gs/mac/gs" )
-
-chmod +x "${ROOT}/resources/gs/mac/gs"
+  # Staged, not installed. The verification section below moves it into
+  # resources/gs/mac/ only after every check passes.
+  cp bin/gs "${WORK}/gs-candidate" )
 
 say "Verifying"
-echo "arch:    $(lipo -archs "${ROOT}/resources/gs/mac/gs")"
-echo "version: $("${ROOT}/resources/gs/mac/gs" --version)"
+
+# The candidate is verified at a staging path and only moved into
+# resources/gs/mac/ once every check passes. Copying first and checking after
+# would leave a binary this script just rejected sitting exactly where
+# packaging looks for it — and "exit 1" only protects callers who check it.
+CANDIDATE="${WORK}/gs-candidate"
+FINAL="${ROOT}/resources/gs/mac/gs"
+
+fail() { echo "ERROR: $1"; echo "Refusing to install the binary."; rm -f "${CANDIDATE}"; exit 1; }
+
+# Each check is a standalone assignment, NOT a command substitution inside
+# echo. `set -e` ignores a failing $(...) embedded in an echo argument, so
+# `echo "version: $("${BIN}" --version)"` silently continues on a broken
+# binary. Standalone `var=$(...)` assignments are covered.
+ARCHS=$(lipo -archs "${CANDIDATE}") || fail "lipo could not read the binary — it is not a valid Mach-O."
+VERSION=$("${CANDIDATE}" --version) || fail "the binary does not execute."
+LINKS=$(otool -L "${CANDIDATE}") || fail "otool could not read the binary."
+
+DEPS=$(printf '%s\n' "${LINKS}" | tail -n +2)
+# An empty dependency list means otool produced nothing useful. Without this,
+# `grep -v` over zero lines exits 1 — indistinguishable from a genuinely clean
+# binary — so the gate would pass vacuously for a corrupt file.
+[ -n "${DEPS}" ] || fail "otool produced no dependency lines; cannot verify."
+
+echo "arch:    ${ARCHS}"
+echo "version: ${VERSION}"
 echo "links:"
-otool -L "${ROOT}/resources/gs/mac/gs" | tail -n +2
-echo
-echo "Every line above must be under /usr/lib or /System. Anything under"
-echo "/opt/homebrew or /usr/local means the binary is NOT self-contained."
+printf '%s\n' "${DEPS}"
 echo
 
-# Hard gate: refuse to ship a binary that depends on anything outside the OS.
-# This has already caught one real failure (a Homebrew libidn link), so it is
-# an assertion, not a formality.
-if otool -L "${ROOT}/resources/gs/mac/gs" | tail -n +2 \
-     | grep -qvE '^\s+(/usr/lib/|/System/)'; then
-  echo "ERROR: the binary links a non-system library (listed above)."
-  echo "It would run here and fail on every other Mac. Refusing to continue."
-  exit 1
+# Hard gate: refuse to ship a binary depending on anything outside the OS.
+# This has already caught two real failures (Homebrew libidn, Homebrew
+# fontconfig), so it is an assertion, not a formality.
+if printf '%s\n' "${DEPS}" | grep -qvE '^[[:space:]]+(/usr/lib/|/System/)'; then
+  fail "the binary links a non-system library (listed above). It would run here and fail on every other Mac."
 fi
-echo "OK: binary is self-contained."
+
+mv "${CANDIDATE}" "${FINAL}"
+chmod +x "${FINAL}"
+echo "OK: binary is self-contained, installed at resources/gs/mac/gs"
 ```
 
 - [ ] **Step 6: Run the fetch script**
