@@ -587,6 +587,8 @@ export interface CompressOutcome {
 
 export type FailureKind =
   | 'not-pdf'
+  /** The chosen file could not be opened — moved, renamed, deleted, or no permission. */
+  | 'input-unreadable'
   | 'encrypted'
   | 'no-space'
   | 'gs-missing'
@@ -1967,6 +1969,7 @@ import { GsError } from './gs-run'
 
 const MESSAGES: Record<FailureKind, string> = {
   'not-pdf': "This file isn't a readable PDF.",
+  'input-unreadable': "Couldn't open that file. It may have been moved, renamed, or deleted.",
   encrypted: 'This PDF is password-protected. Remove the password and try again.',
   'no-space': 'Ran out of disk space while compressing.',
   'gs-missing': "Something's wrong with this installation — please reinstall.",
@@ -2140,14 +2143,30 @@ describe('compressFile', () => {
     await cleanupWorkDir(res.outcome.outputPath!)
   }, 300_000)
 
-  it('returns a failure rather than throwing on a non-PDF', async () => {
+  it('reports a missing input as unreadable, not as a broken installation', async () => {
+    // A missing input file and a missing Ghostscript binary both raise ENOENT.
+    // Telling someone whose PDF moved to reinstall the app is actively
+    // misleading, so this pins the distinction.
     const res = await compressFile({
       ...base, inputPath: join(FIXTURES, 'nope.pdf'), targetBytes: 1_750_000,
     })
     expect(res.ok).toBe(false)
     if (res.ok) return
-    expect(res.failure.message).toBeTruthy()
+    expect(res.failure.kind).toBe('input-unreadable')
+    expect(res.failure.message).toBe(
+      "Couldn't open that file. It may have been moved, renamed, or deleted.",
+    )
   })
+
+  it('still reports a genuinely missing Ghostscript as an installation problem', async () => {
+    const res = await compressFile({
+      ...base, gsPath: '/nonexistent/path/to/gs',
+      inputPath: SCAN, targetBytes: 1_750_000,
+    })
+    expect(res.ok).toBe(false)
+    if (res.ok) return
+    expect(res.failure.kind).toBe('gs-missing')
+  }, 60_000)
 
   it('reports progress in increasing attempt order', async () => {
     const seen: number[] = []
@@ -2191,9 +2210,28 @@ export interface CompressFileOptions {
 const WORK_PREFIX = 'pdf-compressor-'
 
 export async function compressFile(opts: CompressFileOptions): Promise<CompressResponse> {
+  // Reading the input is checked separately from everything else. Both a
+  // missing input file and a missing Ghostscript binary raise ENOENT, and
+  // `classifyFailure` sees only the code — so without this, a PDF the user
+  // moved or renamed would be reported as "Something's wrong with this
+  // installation — please reinstall.", sending them to reinstall a working app
+  // while the real problem goes untouched.
+  let inputBytes: number
+  try {
+    inputBytes = (await stat(opts.inputPath)).size
+  } catch (err) {
+    return {
+      ok: false,
+      failure: {
+        kind: 'input-unreadable',
+        message: "Couldn't open that file. It may have been moved, renamed, or deleted.",
+        details: err instanceof Error ? (err.stack ?? err.message) : String(err),
+      },
+    }
+  }
+
   let workDir: string | null = null
   try {
-    const { size: inputBytes } = await stat(opts.inputPath)
     workDir = await mkdtemp(join(tmpdir(), WORK_PREFIX))
 
     const outcome = await compress({
