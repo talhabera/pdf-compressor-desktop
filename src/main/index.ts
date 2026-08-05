@@ -1,6 +1,6 @@
 import { join } from 'node:path'
 import { app, BrowserWindow, shell } from 'electron'
-import { abortActiveCompression, registerIpc } from './ipc'
+import { registerIpc, shutdown } from './ipc'
 
 function createWindow(): void {
   const win = new BrowserWindow({
@@ -36,7 +36,16 @@ app.whenReady().then(() => {
   })
 })
 
-app.on('before-quit', abortActiveCompression)
+// Electron will not wait for an async `before-quit` listener, so hold the quit
+// open, finish cleaning up, then exit for real. Without this the temp directory
+// of an unsaved result usually survives the quit.
+let quitting = false
+app.on('before-quit', (event) => {
+  if (quitting) return
+  event.preventDefault()
+  quitting = true
+  void shutdown().finally(() => app.exit(0))
+})
 
 app.on('window-all-closed', () => {
   if (process.platform !== 'darwin') app.quit()
