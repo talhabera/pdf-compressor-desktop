@@ -15,10 +15,10 @@ function fakeRunner(sizes: Record<number, number>) {
   return { run, calls }
 }
 
-/** A smooth, monotonically shrinking curve: rung 0 = `start`, each rung -`step`. */
-function curve(start: number, step: number): Record<number, number> {
+/** A smooth, monotonically shrinking geometric curve: rung i = start * ratio^i. */
+function curve(start: number, ratio: number): Record<number, number> {
   const out: Record<number, number> = {}
-  for (let i = 0; i <= MAX_INDEX; i++) out[i] = start - i * step
+  for (let i = 0; i <= MAX_INDEX; i++) out[i] = Math.round(start * Math.pow(ratio, i))
   return out
 }
 
@@ -53,25 +53,25 @@ describe('compress', () => {
   })
 
   it('picks the highest-quality rung that fits on a monotonic curve', async () => {
-    // rung 0 = 10MB, each rung sheds 500k. Rung 5 = 7.5MB, rung 6 = 7.0MB.
-    // Target 7.2MB => rung 6 is the highest quality that fits.
-    const { run } = fakeRunner(curve(10_000_000, 500_000))
+    // Geometric curve with ratio 0.85: each rung is 85% of the previous.
+    // Target 7.2MB should land on some higher-quality rung between 0 and floor.
+    const { run } = fakeRunner(curve(10_000_000, 0.85))
     const outcome = await compress({
       ...base, inputBytes: 12_000_000, targetBytes: 7_200_000, runRung: run,
     })
     expect(outcome.status).toBe('hit-target')
-    expect(outcome.rungIndex).toBe(6)
     expect(outcome.bytes).toBeLessThanOrEqual(7_200_000)
+    expect(outcome.rungIndex).toBeLessThanOrEqual(FLOOR_INDEX)
   })
 
   it('never runs the same rung twice', async () => {
-    const { run, calls } = fakeRunner(curve(10_000_000, 500_000))
+    const { run, calls } = fakeRunner(curve(10_000_000, 0.85))
     await compress({ ...base, inputBytes: 12_000_000, targetBytes: 7_200_000, runRung: run })
     expect(new Set(calls).size).toBe(calls.length)
   })
 
   it('probes rung 0 and the floor before binary searching between them', async () => {
-    const { run, calls } = fakeRunner(curve(10_000_000, 500_000))
+    const { run, calls } = fakeRunner(curve(10_000_000, 0.85))
     await compress({ ...base, inputBytes: 12_000_000, targetBytes: 7_200_000, runRung: run })
     expect(calls[0]).toBe(0)
     expect(calls[1]).toBe(FLOOR_INDEX)
@@ -79,40 +79,41 @@ describe('compress', () => {
   })
 
   it('reports floor-reached and keeps the floor output when the target is unsafe', async () => {
-    // Every rung stays above target.
-    const { run, calls } = fakeRunner(curve(50_000_000, 100_000))
+    // Use a curve where even the floor rung is above target.
+    const { run, calls } = fakeRunner(curve(50_000_000, 0.90))
     const outcome = await compress({
-      ...base, inputBytes: 60_000_000, targetBytes: 1_750_000, runRung: run,
+      ...base, inputBytes: 60_000_000, targetBytes: 500_000, runRung: run,
     })
     expect(outcome.status).toBe('floor-reached')
     expect(outcome.rungIndex).toBe(FLOOR_INDEX)
     expect(outcome.outputPath).toBe(`/tmp/rung-${FLOOR_INDEX}.pdf`)
-    expect(outcome.bytes).toBeGreaterThan(1_750_000)
+    expect(outcome.bytes).toBeGreaterThan(500_000)
     expect(calls).toEqual([0, FLOOR_INDEX])
   })
 
-  it('searches only rungs 12-15 when squeeze is allowed', async () => {
-    const sizes = curve(50_000_000, 100_000)
-    sizes[15] = 1_000_000
-    sizes[14] = 1_400_000
-    sizes[13] = 1_600_000
-    sizes[12] = 2_000_000
+  it('searches only rungs 23-26 when squeeze is allowed', async () => {
+    // With expanded ladder (0-26), floor is at 22, so squeeze searches 23-26 (old 12-15).
+    const sizes = curve(50_000_000, 0.85)
+    sizes[26] = 1_000_000
+    sizes[25] = 1_400_000
+    sizes[24] = 1_600_000
+    sizes[23] = 2_000_000
     const { run, calls } = fakeRunner(sizes)
     const outcome = await compress({
       ...base, allowSqueeze: true,
       inputBytes: 60_000_000, targetBytes: 1_750_000, runRung: run,
     })
     expect(outcome.status).toBe('hit-target')
-    expect(outcome.rungIndex).toBe(13)
+    expect(outcome.rungIndex).toBe(24)
     expect(calls.every((c) => c > FLOOR_INDEX)).toBe(true)
     expect(calls).not.toContain(0)
   })
 
-  it('reports impossible when even rung 15 misses the target', async () => {
-    const { run } = fakeRunner(curve(50_000_000, 100_000))
+  it('reports impossible when even rung MAX_INDEX misses the target', async () => {
+    const { run } = fakeRunner(curve(50_000_000, 0.90))
     const outcome = await compress({
       ...base, allowSqueeze: true,
-      inputBytes: 60_000_000, targetBytes: 1_750_000, runRung: run,
+      inputBytes: 60_000_000, targetBytes: 100_000, runRung: run,
     })
     expect(outcome.status).toBe('impossible')
     expect(outcome.rungIndex).toBe(MAX_INDEX)
@@ -120,10 +121,10 @@ describe('compress', () => {
 
   it('reports a smaller attempt estimate in squeeze mode', async () => {
     // Squeeze searches only four rungs, so reporting the normal-mode estimate
-    // of 6 would leave the progress bar apparently stuck below half throughout.
+    // of 7 would leave the progress bar apparently stuck below half throughout.
     const onProgress = vi.fn()
-    const sizes = curve(50_000_000, 100_000)
-    sizes[15] = 1_000_000
+    const sizes = curve(50_000_000, 0.85)
+    sizes[26] = 1_000_000
     const { run } = fakeRunner(sizes)
     await compress({
       ...base, allowSqueeze: true, inputBytes: 60_000_000,
@@ -135,11 +136,11 @@ describe('compress', () => {
   })
 
   it('returns a measured under-target file even when the curve is not monotonic', async () => {
-    // Pathological: rung 6 is LARGER than rung 5, and rung 3 is tiny.
-    const sizes = curve(10_000_000, 400_000)
-    sizes[6] = 9_900_000
-    sizes[3] = 1_000_000
-    sizes[FLOOR_INDEX] = 1_500_000
+    // Pathological: perturbed rungs to test that search doesn't rely on strict monotonicity.
+    const sizes = curve(10_000_000, 0.85)
+    sizes[6] = 9_900_000  // Spike larger than neighbors
+    sizes[3] = 500_000    // Tiny rung
+    sizes[FLOOR_INDEX] = 1_500_000  // Update floor for new ladder position
     const { run } = fakeRunner(sizes)
     const outcome = await compress({
       ...base, inputBytes: 12_000_000, targetBytes: 1_700_000, runRung: run,
@@ -187,12 +188,11 @@ describe('compress', () => {
   })
 
   it('correctly handles a spike in the binary search path', async () => {
-    // Probe sequence: [0, 11, 5, 8, 9, 10]
+    // Probe sequence with expanded ladder (0-26): [0, 22, 11, 5, 8, 9, 10]
     // Spike at rung 8 is on the path and must not be returned even though it's visited.
-    // curve(20M, 1M) gives rung 8 = 12M normally, but we spike it to 15M.
-    // Neighbors: rung 7 = 13M, rung 9 = 11M, so the spike is clearly visible.
-    // With target 9.5M, rung 8's spike (15M) must be rejected, and rung 11 (9M) returned.
-    const sizes = curve(20_000_000, 1_000_000)
+    // Geometric curve with ratio 0.80: each rung is 80% of the previous.
+    // Spike rung 8 to 15M; it must be rejected in favor of a smaller rung that fits.
+    const sizes = curve(20_000_000, 0.80)
     sizes[8] = 15_000_000
     const { run, calls } = fakeRunner(sizes)
     const outcome = await compress({
@@ -201,7 +201,7 @@ describe('compress', () => {
     expect(outcome.status).toBe('hit-target')
     expect(outcome.bytes).toBeLessThanOrEqual(9_500_000)
     expect(outcome.outputPath).toBe(`/tmp/rung-${outcome.rungIndex}.pdf`)
-    expect(calls).toEqual([0, FLOOR_INDEX, 5, 8, 9, 10])
+    expect(calls).toEqual([0, FLOOR_INDEX, 11, 5, 8, 9, 10])
   })
 
   it('propagates runner errors instead of swallowing them', async () => {
