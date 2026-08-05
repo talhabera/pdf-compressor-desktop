@@ -1,0 +1,50 @@
+{
+  "name": "pdf-compressor-desktop",
+  "version": "0.1.0",
+  "description": "Compress a PDF to a size you choose",
+  "main": "./out/main/index.js",
+  "scripts": {
+    "postinstall": "install-electron",
+    "test": "vitest run tests/unit",
+    "dev": "electron-vite dev",
+    "build": "electron-vite build",
+    "typecheck": "tsc --noEmit -p tsconfig.node.json && tsc --noEmit -p tsconfig.web.json",
+    "test:integration": "vitest run tests/integration",
+    "fetch-gs": "bash scripts/fetch-ghostscript.sh",
+    "fixtures": "node scripts/make-fixtures.mjs",
+    "pack:mac": "npm run build && electron-builder --mac",
+    "pack:win": "npm run build && electron-builder --win"
+  },
+  "keywords": [],
+  "author": "talhabera",
+  "license": "AGPL-3.0-or-later",
+  "type": "module",
+  "private": true,
+  "devDependencies": {
+    "@types/node": "^26.1.2",
+    "@types/react": "^19.2.18",
+    "@types/react-dom": "^19.2.4",
+    "@vitejs/plugin-react": "^5.2.0",
+    "electron": "^43.3.0",
+    "electron-builder": "^26.15.3",
+    "electron-vite": "^5.0.0",
+    "pdf-lib": "^1.17.1",
+    "typescript": "^7.0.2",
+    "vite": "^7.3.6",
+    "vitest": "^4.1.10"
+  },
+  "allowScripts": {
+    "electron-winstaller@5.4.0": true,
+    "esbuild@0.25.12": true,
+    "esbuild@0.28.1": true,
+    "fsevents@2.3.3": true
+  },
+  "dependencies": {
+    "react": "^19.2.8",
+    "react-dom": "^19.2.8"
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/talhabera/pdf-compressor-desktop.git"
+  }
+}

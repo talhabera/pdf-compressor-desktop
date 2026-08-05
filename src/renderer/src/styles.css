@@ -1,0 +1,268 @@
+/*
+ * Calibration: enamel white, graphite, one amber needle. Every measured
+ * quantity renders in the monospace face; every sentence renders in the
+ * system sans. That split is not decoration — it is how the eye tells what
+ * the machine measured from what the app is telling you. Amber is spent on
+ * exactly two things: the target line on the track, and keyboard focus. It
+ * does not leak into buttons or hover states — a needle is only useful
+ * because it is the one thing on the dial that moves.
+ */
+
+:root {
+  --paper: #fbfaf7;
+  --ink: #17191c;
+  --muted: #6e7278;
+  --rule: #e2e1db;
+  --amber: #b4761f;
+  --danger: #a32b22;
+  --font-sans: system-ui, -apple-system, 'Segoe UI', sans-serif;
+  --font-mono: ui-monospace, SFMono-Regular, 'SF Mono', Menlo, Consolas, monospace;
+  color-scheme: light dark;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --paper: #131417;
+    --ink: #ecebe7;
+    --muted: #8b9096;
+    --rule: #2a2c31;
+    --amber: #d99a3e;
+    --danger: #e8776b;
+  }
+}
+
+* { box-sizing: border-box; }
+
+html, body { height: 100%; }
+
+body {
+  margin: 0;
+  background: var(--paper);
+  color: var(--ink);
+  font: 14px/1.5 var(--font-sans);
+  user-select: none;
+}
+
+button, input { user-select: none; }
+input { user-select: text; }
+
+main {
+  padding: 32px 28px 28px;
+  display: flex;
+  flex-direction: column;
+  gap: 22px;
+  height: 100%;
+}
+
+h1 {
+  font: 600 13px/1 var(--font-sans);
+  color: var(--muted);
+  letter-spacing: 0.01em;
+  margin: 0;
+}
+
+.mono {
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+}
+
+:focus-visible {
+  outline: 2px solid var(--amber);
+  outline-offset: 2px;
+}
+
+/* ---- layout helpers ---- */
+
+.row { display: flex; align-items: center; gap: 10px; }
+.row.between { justify-content: space-between; }
+
+.sep { color: var(--rule); }
+.label { color: var(--muted); font-size: 13px; }
+
+.section {
+  padding-top: 18px;
+  border-top: 1px solid var(--rule);
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+/* ---- drop zone ---- */
+
+.dropzone {
+  border: 1.5px dashed var(--rule);
+  border-radius: 6px;
+  padding: 44px 20px;
+  text-align: center;
+  cursor: pointer;
+  transition: border-color 120ms ease;
+}
+.dropzone:hover, .dropzone.over { border-color: var(--ink); }
+.dropzone.filled {
+  text-align: left;
+  padding: 18px 20px;
+  border-style: solid;
+  cursor: default;
+}
+.dropzone .title { font-size: 14px; }
+.dropzone .hint { color: var(--muted); font-size: 13px; margin-top: 4px; }
+.dropzone .filename { font: 600 14px/1.3 var(--font-sans); word-break: break-all; }
+.dropzone .sub { color: var(--muted); font-size: 13px; margin-top: 4px; }
+
+/* ---- target input ---- */
+
+.target-input {
+  width: 56px;
+  padding: 4px 2px;
+  font: inherit;
+  font-size: 14px;
+  text-align: right;
+  border: none;
+  border-bottom: 1.5px solid var(--rule);
+  border-radius: 0;
+  background: transparent;
+  color: var(--ink);
+}
+.target-input:disabled { color: var(--muted); }
+.target-input:focus-visible {
+  outline: none;
+  border-bottom-color: var(--amber);
+}
+
+/* ---- buttons ---- */
+
+button {
+  font: 600 14px/1 var(--font-sans);
+  cursor: pointer;
+}
+
+.btn {
+  padding: 10px 18px;
+  border-radius: 6px;
+  border: none;
+  background: var(--ink);
+  color: var(--paper);
+  transition: opacity 120ms ease;
+}
+.btn:hover:not(:disabled) { opacity: 0.85; }
+.btn:disabled { opacity: 0.35; cursor: default; }
+
+.btn-ghost {
+  padding: 10px 18px;
+  border-radius: 6px;
+  border: 1.5px solid var(--rule);
+  background: transparent;
+  color: var(--ink);
+}
+.btn-ghost:hover:not(:disabled) { border-color: var(--ink); }
+.btn-ghost:disabled { opacity: 0.35; cursor: default; }
+
+.btn-link {
+  border: none;
+  background: none;
+  padding: 0;
+  font: 400 13px/1 var(--font-sans);
+  color: var(--muted);
+  text-decoration: underline;
+}
+.btn-link:disabled { opacity: 0.5; cursor: default; }
+
+/* ---- measurement track ---- */
+
+.track-status {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+  font-size: 13px;
+  color: var(--muted);
+}
+.track-status .rung { color: var(--ink); }
+
+.track {
+  position: relative;
+  height: 44px;
+  margin: 4px 0 2px;
+}
+
+.track-line {
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: 50%;
+  height: 1.5px;
+  background: var(--rule);
+}
+/* End caps, echoing a ruled instrument: ├────┤ */
+.track-line::before, .track-line::after {
+  content: '';
+  position: absolute;
+  top: -4.5px;
+  width: 1.5px;
+  height: 10px;
+  background: var(--rule);
+}
+.track-line::before { left: 0; }
+.track-line::after { right: 0; }
+
+.track-target {
+  position: absolute;
+  top: -6px;
+  bottom: -6px;
+  width: 1.5px;
+  background: var(--amber);
+  transform: translateX(-50%);
+}
+
+.track-tick {
+  position: absolute;
+  top: 50%;
+  width: 2px;
+  height: 16px;
+  background: var(--ink);
+  transform: translate(-50%, -50%);
+  animation: tick-in 180ms ease-out backwards;
+}
+/* A measurement that fit under the target — the same amber as the target
+   line itself, so it reads as "found something," not just another mark.
+   Everything that didn't fit stays plain ink: still a real measurement,
+   just not a candidate. */
+.track-tick.fits { background: var(--amber); }
+@keyframes tick-in {
+  from { opacity: 0; transform: translate(-50%, -50%) translateY(-2px); }
+  to { opacity: 1; transform: translate(-50%, -50%) translateY(0); }
+}
+@media (prefers-reduced-motion: reduce) {
+  .track-tick { animation: none; }
+}
+
+.track-scale {
+  position: relative;
+  height: 16px;
+  font-size: 12px;
+  color: var(--muted);
+}
+.track-scale .at-zero { position: absolute; left: 0; }
+.track-scale .at-end { position: absolute; right: 0; }
+.track-scale .at-target {
+  position: absolute;
+  transform: translateX(-50%);
+  color: var(--amber);
+}
+
+/* ---- result ---- */
+
+.result-sizes {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  font: 600 28px/1 var(--font-mono);
+}
+.result-sizes .before,
+.result-sizes .arrow {
+  color: var(--muted);
+  font-size: 16px;
+  font-weight: 400;
+}
+
+.note { color: var(--muted); font-size: 14px; }
+.error { color: var(--danger); font-size: 14px; }

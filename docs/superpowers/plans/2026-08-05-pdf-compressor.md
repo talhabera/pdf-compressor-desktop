@@ -73,8 +73,9 @@ README.md
 ### Task 1: Project scaffold
 
 **Files:**
-- Create: `package.json`, `electron.vite.config.ts`, `electron-builder.yml`, `tsconfig.json`, `tsconfig.node.json`, `tsconfig.web.json`, `vitest.config.ts`, `.npmrc`
+- Create: `package.json`, `electron.vite.config.ts`, `tsconfig.json`, `tsconfig.node.json`, `tsconfig.web.json`, `vitest.config.ts`
 - Create: `src/main/index.ts`, `src/preload/index.ts`, `src/renderer/index.html`, `src/renderer/src/main.tsx`, `src/renderer/src/App.tsx`
+- Note: `electron-builder.yml` is created in Task 11, which specifies its full content. Do not stub it here.
 - Test: `tests/unit/format.test.ts`, `src/renderer/src/format.ts`
 
 **Interfaces:**
@@ -287,7 +288,10 @@ function createWindow(): void {
     show: false,
     titleBarStyle: process.platform === 'darwin' ? 'hiddenInset' : 'default',
     webPreferences: {
-      preload: join(import.meta.dirname, '../preload/index.js'),
+      // .mjs, not .js — electron-vite emits the preload with that extension
+      // under "type": "module". Pointing at .js fails silently: the preload
+      // never loads, and the contextBridge API is simply absent at runtime.
+      preload: join(import.meta.dirname, '../preload/index.mjs'),
       sandbox: false,
       contextIsolation: true,
       nodeIntegration: false,
@@ -391,9 +395,9 @@ git commit -m "chore: scaffold Electron + React + TypeScript project"
 **Interfaces:**
 - Consumes: nothing.
 - Produces:
-  - `interface Rung { index: number; dpi: number | null; qFactor: number | null; grayscale: boolean; label: string }`
-  - `const RUNGS: readonly Rung[]` — 16 entries, index 0–15
-  - `const FLOOR_INDEX = 11`, `const MAX_INDEX = 15`
+  - `interface Rung { index: number; dpi: number | null; qFactor: number | null; label: string }`
+  - `const RUNGS: readonly Rung[]` — 27 entries, index 0–26
+  - `const FLOOR_INDEX = 22`, `const MAX_INDEX = 26`
   - `function buildGsArgs(rung: Rung, inputPath: string, outputPath: string): string[]`
 
 - [ ] **Step 1: Write the failing tests**
@@ -405,26 +409,37 @@ import { describe, expect, it } from 'vitest'
 import { RUNGS, FLOOR_INDEX, MAX_INDEX, buildGsArgs } from '../../src/main/ladder'
 
 describe('RUNGS', () => {
-  it('has 16 rungs indexed 0..15', () => {
-    expect(RUNGS).toHaveLength(16)
+  it('has 27 rungs indexed 0..26', () => {
+    expect(RUNGS).toHaveLength(27)
     RUNGS.forEach((r, i) => expect(r.index).toBe(i))
   })
 
-  it('places the readability floor at 11 and the hard limit at 15', () => {
-    expect(FLOOR_INDEX).toBe(11)
-    expect(MAX_INDEX).toBe(15)
-    expect(RUNGS[MAX_INDEX]!.index).toBe(15)
+  it('places the readability floor at 22 and the hard limit at 26', () => {
+    expect(FLOOR_INDEX).toBe(22)
+    expect(MAX_INDEX).toBe(26)
+    expect(RUNGS[MAX_INDEX]!.index).toBe(26)
+  })
+
+  it('keeps the steps fine enough not to waste the user's budget', () => {
+    // The search returns the largest result that fits, so a coarse ladder
+    // overshoots downward and hands back a file much smaller than asked for.
+    // DPI must never drop by more than 12% in a single step through the
+    // working range, or that waste creeps back in.
+    for (let i = 2; i <= 21; i++) {
+      const prev = RUNGS[i - 1]!.dpi!
+      const here = RUNGS[i]!.dpi!
+      expect((prev - here) / prev).toBeLessThanOrEqual(0.12)
+    }
   })
 
   it('has a structural-only rung 0 with no image settings', () => {
     expect(RUNGS[0]!.dpi).toBeNull()
     expect(RUNGS[0]!.qFactor).toBeNull()
-    expect(RUNGS[0]!.grayscale).toBe(false)
   })
 
-  it('decreases DPI monotonically from rung 1 down', () => {
+  it('never increases DPI as the ladder descends', () => {
     for (let i = 2; i <= MAX_INDEX; i++) {
-      expect(RUNGS[i]!.dpi!).toBeLessThan(RUNGS[i - 1]!.dpi!)
+      expect(RUNGS[i]!.dpi!).toBeLessThanOrEqual(RUNGS[i - 1]!.dpi!)
     }
   })
 
@@ -434,10 +449,13 @@ describe('RUNGS', () => {
     }
   })
 
-  it('turns on grayscale at the floor and keeps it on below', () => {
-    expect(RUNGS[FLOOR_INDEX - 1]!.grayscale).toBe(false)
-    for (let i = FLOOR_INDEX; i <= MAX_INDEX; i++) {
-      expect(RUNGS[i]!.grayscale).toBe(true)
+  it('never converts colour to grayscale at any rung', () => {
+    // Turning a colour document black and white changes its content, not its
+    // quality. An earlier ladder did this from the floor down; it made scanned
+    // forms, signatures and charts come back monochrome without being asked.
+    for (let i = 0; i <= MAX_INDEX; i++) {
+      expect(args(i).join(' ')).not.toContain('ColorConversionStrategy')
+      expect(args(i).join(' ')).not.toContain('DeviceGray')
     }
   })
 
@@ -450,14 +468,14 @@ describe('buildGsArgs', () => {
   const args = (i: number) => buildGsArgs(RUNGS[i]!, '/in.pdf', '/out.pdf')
 
   it('always writes to the output path and reads the input last', () => {
-    const a = args(5)
+    const a = args(10)
     expect(a).toContain('-sOutputFile=/out.pdf')
     expect(a[a.length - 2]).toBe('-f')
     expect(a[a.length - 1]).toBe('/in.pdf')
   })
 
   it('always uses the pdfwrite device with batch flags', () => {
-    for (const a of [args(0), args(5), args(15)]) {
+    for (const a of [args(0), args(10), args(26)]) {
       expect(a).toContain('-sDEVICE=pdfwrite')
       expect(a).toContain('-dNOPAUSE')
       expect(a).toContain('-dBATCH')
@@ -473,36 +491,77 @@ describe('buildGsArgs', () => {
     expect(a).not.toContain('-c')
   })
 
+  it('forces lossless Flate on rung 0 rather than trusting AutoFilter', () => {
+    // pdfwrite's AutoFilter default silently applies lossy JPEG, which would
+    // make rung 0's "zero quality loss" promise untrue.
+    const a = args(0)
+    expect(a).toContain('-dAutoFilterColorImages=false')
+    expect(a).toContain('-dColorImageFilter=/FlateEncode')
+    expect(a).toContain('-dAutoFilterGrayImages=false')
+    expect(a).toContain('-dGrayImageFilter=/FlateEncode')
+    expect(a).not.toContain('-dColorImageFilter=/DCTEncode')
+  })
+
+  it('lowers the downsample threshold so each rung honours its DPI', () => {
+    // Default threshold is 1.5, which leaves a 200 DPI scan untouched by every
+    // rung down to 133 DPI and creates a large cliff mid-ladder.
+    for (const i of [1, 10, 22, 26]) {
+      expect(args(i)).toContain('-dColorImageDownsampleThreshold=1.0')
+      expect(args(i)).toContain('-dGrayImageDownsampleThreshold=1.0')
+      expect(args(i)).toContain('-dMonoImageDownsampleThreshold=1.0')
+    }
+  })
+
   it('sets colour and gray resolution to the rung DPI', () => {
-    const a = args(5)
+    const a = args(10)
     expect(a).toContain('-dColorImageResolution=150')
     expect(a).toContain('-dGrayImageResolution=150')
   })
 
   it('keeps mono images at twice the DPI but never below 300', () => {
-    expect(args(5)).toContain('-dMonoImageResolution=300')
+    expect(args(10)).toContain('-dMonoImageResolution=300')
     expect(args(1)).toContain('-dMonoImageResolution=500')
-    expect(args(15)).toContain('-dMonoImageResolution=300')
+    expect(args(26)).toContain('-dMonoImageResolution=300')
   })
 
   it('passes the rung QFactor into all four image dicts', () => {
-    const a = args(5)
+    const a = args(10)
     const c = a[a.indexOf('-c') + 1]!
     expect(c).toContain('setdistillerparams')
     expect(c.match(/\/QFactor 0\.4\b/g)).toHaveLength(4)
+    // Rung 10 is below the chroma boundary, so colour is subsampled here.
+    expect(c.match(/\/HSamples \[2 1 1 1\]/g)).toHaveLength(4)
+    expect(c.match(/\/VSamples \[2 1 1 1\]/g)).toHaveLength(4)
     for (const key of ['ColorACSImageDict', 'ColorImageDict', 'GrayACSImageDict', 'GrayImageDict']) {
       expect(c).toContain(key)
     }
   })
 
-  it('converts to grayscale only at and below the floor', () => {
-    expect(args(10)).not.toContain('-sColorConversionStrategy=Gray')
-    expect(args(11)).toContain('-sColorConversionStrategy=Gray')
-    expect(args(11)).toContain('-dProcessColorModel=/DeviceGray')
+  it('keeps full chroma on the rungs labelled high quality', () => {
+    // 4:2:0 costs ~49% more error on saturated fine detail (stamps, rules,
+    // signatures). "High quality" is a promise to the user; rungs 1-8 keep
+    // full colour resolution and only rungs 9+ trade it away.
+    for (let i = 1; i <= 8; i++) {
+      const c = args(i)[args(i).indexOf('-c') + 1]!
+      expect(c, `rung ${i} is labelled high quality but subsamples chroma`)
+        .toContain('/HSamples [1 1 1 1]')
+    }
+    for (let i = 9; i <= MAX_INDEX; i++) {
+      const c = args(i)[args(i).indexOf('-c') + 1]!
+      expect(c, `rung ${i} should subsample chroma`).toContain('/HSamples [2 1 1 1]')
+    }
+  })
+
+  it('never passes -dProcessColorModel, which pdfwrite rejects outright', () => {
+    // Ghostscript 10.07 fails with "rangecheck in .putdeviceprops" — this would
+    // kill every rung from the readability floor down.
+    for (let i = 0; i <= MAX_INDEX; i++) {
+      expect(args(i).join(' ')).not.toContain('-dProcessColorModel')
+    }
   })
 
   it('puts -c before -f, which Ghostscript requires', () => {
-    const a = args(11)
+    const a = args(22)
     expect(a.indexOf('-c')).toBeLessThan(a.indexOf('-f'))
   })
 })
@@ -524,7 +583,6 @@ export interface Rung {
   dpi: number | null
   /** Ghostscript JPEG QFactor. Higher is worse. `null` on rung 0. */
   qFactor: number | null
-  grayscale: boolean
   /** Plain-language quality description shown to the user. */
   label: string
 }
@@ -541,6 +599,18 @@ export interface CompressProgress {
   rungIndex: number
   rungLabel: string
   dpi: number | null
+  /**
+   * The measured output size, or `null` while the attempt is still running.
+   *
+   * Each attempt emits twice: once on start with `bytes: null`, once on
+   * completion with the real byte count. The UI needs both — the first drives
+   * "attempt 3 of 6, trying reduced image quality" during a pass that can take
+   * several seconds, and the second is the only place a *measured* size for an
+   * intermediate attempt exists. Without the pair, a progress display could
+   * only ever infer sizes, and an inferred number presented as a measurement
+   * is worse than no number at all.
+   */
+  bytes: number | null
 }
 
 export interface CompressOutcome {
@@ -555,6 +625,8 @@ export interface CompressOutcome {
 
 export type FailureKind =
   | 'not-pdf'
+  /** The chosen file could not be opened — moved, renamed, deleted, or no permission. */
+  | 'input-unreadable'
   | 'encrypted'
   | 'no-space'
   | 'gs-missing'
@@ -582,32 +654,56 @@ export type CompressResponse =
 import type { Rung } from '@shared/types'
 
 /** Index of the readability floor. Rungs below this need explicit user consent. */
-export const FLOOR_INDEX = 11
+/** Index of the readability floor. Rungs below this need explicit user consent. */
+export const FLOOR_INDEX = 22
 /** Index of the harshest rung the app will ever apply. */
-export const MAX_INDEX = 15
+export const MAX_INDEX = 26
 
 const HIGH = 'high quality'
 const REDUCED = 'reduced image quality'
 const HEAVY = 'heavily compressed'
 const EXTREME = 'extremely compressed'
 
+/**
+ * The steps are deliberately fine — 12-19% apart in output size rather than the
+ * ~33% of an earlier, coarser table. Step size is quality the user paid for and
+ * did not receive: the search returns the largest result that still fits, so a
+ * coarse ladder overshoots downward. Measured on a 23.8 MB 300 DPI colour scan
+ * at a 1.75 MB target, the coarse table returned 1,363,051 bytes (78% of the
+ * budget, 150 DPI) where this one returns 1,645,323 (94%, 166 DPI) — same
+ * target, visibly sharper images.
+ *
+ * Sizes below are from that fixture and are indicative, not guarantees; every
+ * rung is measured at run time.
+ */
 export const RUNGS: readonly Rung[] = [
-  { index: 0, dpi: null, qFactor: null, grayscale: false, label: 'original quality' },
-  { index: 1, dpi: 250, qFactor: 0.15, grayscale: false, label: HIGH },
-  { index: 2, dpi: 220, qFactor: 0.2, grayscale: false, label: HIGH },
-  { index: 3, dpi: 200, qFactor: 0.25, grayscale: false, label: HIGH },
-  { index: 4, dpi: 180, qFactor: 0.3, grayscale: false, label: HIGH },
-  { index: 5, dpi: 150, qFactor: 0.4, grayscale: false, label: REDUCED },
-  { index: 6, dpi: 130, qFactor: 0.5, grayscale: false, label: REDUCED },
-  { index: 7, dpi: 110, qFactor: 0.65, grayscale: false, label: REDUCED },
-  { index: 8, dpi: 100, qFactor: 0.8, grayscale: false, label: REDUCED },
-  { index: 9, dpi: 90, qFactor: 1.0, grayscale: false, label: HEAVY },
-  { index: 10, dpi: 80, qFactor: 1.3, grayscale: false, label: HEAVY },
-  { index: 11, dpi: 72, qFactor: 2.0, grayscale: true, label: HEAVY },
-  { index: 12, dpi: 60, qFactor: 2.4, grayscale: true, label: EXTREME },
-  { index: 13, dpi: 50, qFactor: 3.0, grayscale: true, label: EXTREME },
-  { index: 14, dpi: 40, qFactor: 3.5, grayscale: true, label: EXTREME },
-  { index: 15, dpi: 30, qFactor: 4.0, grayscale: true, label: EXTREME },
+  { index: 0, dpi: null, qFactor: null, label: 'original quality' },
+  { index: 1, dpi: 250, qFactor: 0.15, label: HIGH },
+  { index: 2, dpi: 235, qFactor: 0.17, label: HIGH },
+  { index: 3, dpi: 220, qFactor: 0.2, label: HIGH },
+  { index: 4, dpi: 205, qFactor: 0.22, label: HIGH },
+  { index: 5, dpi: 195, qFactor: 0.25, label: HIGH },
+  { index: 6, dpi: 185, qFactor: 0.28, label: HIGH },
+  { index: 7, dpi: 175, qFactor: 0.31, label: HIGH },
+  { index: 8, dpi: 166, qFactor: 0.34, label: HIGH },
+  { index: 9, dpi: 158, qFactor: 0.37, label: REDUCED },
+  { index: 10, dpi: 150, qFactor: 0.4, label: REDUCED },
+  { index: 11, dpi: 142, qFactor: 0.44, label: REDUCED },
+  { index: 12, dpi: 134, qFactor: 0.48, label: REDUCED },
+  { index: 13, dpi: 126, qFactor: 0.53, label: REDUCED },
+  { index: 14, dpi: 118, qFactor: 0.58, label: REDUCED },
+  { index: 15, dpi: 110, qFactor: 0.65, label: REDUCED },
+  { index: 16, dpi: 102, qFactor: 0.72, label: HEAVY },
+  { index: 17, dpi: 95, qFactor: 0.8, label: HEAVY },
+  { index: 18, dpi: 88, qFactor: 0.9, label: HEAVY },
+  { index: 19, dpi: 82, qFactor: 1.0, label: HEAVY },
+  { index: 20, dpi: 76, qFactor: 1.15, label: HEAVY },
+  { index: 21, dpi: 72, qFactor: 1.4, label: HEAVY },
+  { index: 22, dpi: 72, qFactor: 2.0, label: HEAVY },
+  { index: 23, dpi: 60, qFactor: 2.4, label: EXTREME },
+  { index: 24, dpi: 50, qFactor: 3.0, label: EXTREME },
+  { index: 25, dpi: 40, qFactor: 3.5, label: EXTREME },
+  { index: 26, dpi: 30, qFactor: 4.0, label: EXTREME },
 ]
 
 const BASE_ARGS = [
@@ -624,8 +720,29 @@ const BASE_ARGS = [
   '-dEmbedAllFonts=true',
 ]
 
-function distillerParams(qFactor: number): string {
-  const dict = `<</QFactor ${qFactor} /Blend 1 /HSamples [1 1 1 1] /VSamples [1 1 1 1]>>`
+/**
+ * Rungs at and below this index subsample chroma 4:2:0 — colour stored at half
+ * resolution, brightness untouched.
+ *
+ * This is NOT free, despite an earlier claim in this file that it was. That
+ * claim came from measuring against smooth colour, which cannot show the
+ * damage. Measured properly against a page with saturated *fine* detail — 2px
+ * red stamp strokes, 1px blue rules — at rung 10:
+ *
+ *   4:4:4   533,412 bytes   mean error on saturated pixels 22.60
+ *   4:2:0   364,638 bytes   mean error on saturated pixels 33.72
+ *
+ * 32% smaller for 49% more colour error, concentrated exactly on the content a
+ * document compressor exists to protect: stamps, highlighter, signatures,
+ * coloured rules, charts. So it is applied only from the rung where the label
+ * already tells the user quality has been reduced. Rungs 1-8 are labelled
+ * "high quality" and keep full chroma, because that label is a promise.
+ */
+const CHROMA_SUBSAMPLE_FROM = 9
+
+function distillerParams(qFactor: number, subsampleChroma: boolean): string {
+  const s = subsampleChroma ? '[2 1 1 1]' : '[1 1 1 1]'
+  const dict = `<</QFactor ${qFactor} /Blend 1 /HSamples ${s} /VSamples ${s}>>`
   return (
     `<</ColorACSImageDict ${dict} /ColorImageDict ${dict}` +
     ` /GrayACSImageDict ${dict} /GrayImageDict ${dict}>> setdistillerparams`
@@ -634,11 +751,20 @@ function distillerParams(qFactor: number): string {
 
 export function buildGsArgs(rung: Rung, inputPath: string, outputPath: string): string[] {
   if (rung.dpi === null || rung.qFactor === null) {
+    // pdfwrite defaults to AutoFilter, which silently re-encodes images as
+    // lossy JPEG. Forcing FlateEncode is what actually makes this the
+    // zero-quality-loss rung the spec promises. Measured: without these four
+    // flags rung 0 shrank a 13.5 MB fixture to 2.1 MB by discarding image
+    // data while claiming not to; with them it produces 13.1 MB.
     return [
       ...BASE_ARGS,
       '-dDownsampleColorImages=false',
       '-dDownsampleGrayImages=false',
       '-dDownsampleMonoImages=false',
+      '-dAutoFilterColorImages=false',
+      '-dColorImageFilter=/FlateEncode',
+      '-dAutoFilterGrayImages=false',
+      '-dGrayImageFilter=/FlateEncode',
       `-sOutputFile=${outputPath}`,
       '-f',
       inputPath,
@@ -651,6 +777,15 @@ export function buildGsArgs(rung: Rung, inputPath: string, outputPath: string): 
 
   return [
     ...BASE_ARGS,
+    // Ghostscript only downsamples when source/target DPI exceeds this
+    // threshold, which defaults to 1.5. At the default, a 200 DPI scan is
+    // untouched by every rung down to 133 DPI, so the upper ladder varied only
+    // JPEG quality and produced a 4.4x size cliff between rungs 5 and 6.
+    // Setting 1.0 makes each rung actually do what its DPI says: measured,
+    // rung 5 went from 3.89 MB to 1.53 MB on the same input.
+    '-dColorImageDownsampleThreshold=1.0',
+    '-dGrayImageDownsampleThreshold=1.0',
+    '-dMonoImageDownsampleThreshold=1.0',
     '-dDownsampleColorImages=true',
     '-dColorImageDownsampleType=/Bicubic',
     `-dColorImageResolution=${rung.dpi}`,
@@ -664,12 +799,15 @@ export function buildGsArgs(rung: Rung, inputPath: string, outputPath: string): 
     '-dColorImageFilter=/DCTEncode',
     '-dAutoFilterGrayImages=false',
     '-dGrayImageFilter=/DCTEncode',
-    ...(rung.grayscale
-      ? ['-sColorConversionStrategy=Gray', '-dProcessColorModel=/DeviceGray']
-      : []),
+    // No colour conversion at any rung. Turning a colour document black and
+    // white is a change to its content, not a reduction in quality, and the
+    // app must never make that decision on the user's behalf. (Also note
+    // -dProcessColorModel=/DeviceGray must never be added here: it is a
+    // raster-device parameter and pdfwrite rejects it outright with
+    // "rangecheck in .putdeviceprops".)
     `-sOutputFile=${outputPath}`,
     '-c',
-    distillerParams(rung.qFactor),
+    distillerParams(rung.qFactor, rung.index >= CHROMA_SUBSAMPLE_FROM),
     '-f',
     inputPath,
   ]
@@ -700,7 +838,7 @@ git commit -m "feat: add quality ladder and Ghostscript argument builder"
 - Consumes: `RUNGS`, `FLOOR_INDEX`, `MAX_INDEX` from `src/main/ladder.ts`; `Rung`, `CompressOutcome`, `CompressProgress` from `@shared/types`.
 - Produces:
   - `type RungRunner = (rung: Rung) => Promise<{ path: string; bytes: number }>`
-  - `const ESTIMATED_ATTEMPTS = 6`
+  - `const ESTIMATED_ATTEMPTS = 7`
   - `async function compress(opts: CompressOptions): Promise<CompressOutcome>`
   - `interface CompressOptions { inputPath: string; inputBytes: number; targetBytes: number; allowSqueeze: boolean; runRung: RungRunner; onProgress?: (p: CompressProgress) => void }`
 
@@ -789,6 +927,23 @@ describe('compress', () => {
     expect(calls.every((c) => c <= FLOOR_INDEX)).toBe(true)
   })
 
+  it('returns the smallest measured file when the target is unreachable', async () => {
+    // Rung 0 is lossless Flate; on text-heavy documents it can beat the floor's
+    // heavy JPEG. Returning the floor there would hand back a file that is both
+    // larger and worse than one already measured and sitting on disk.
+    const sizes: Record<number, number> = {}
+    for (let i = 0; i <= MAX_INDEX; i++) sizes[i] = 5_000_000
+    sizes[0] = 3_000_000            // lossless wins outright
+    sizes[FLOOR_INDEX] = 4_000_000
+    const { run } = fakeRunner(sizes)
+    const outcome = await compress({
+      ...base, inputBytes: 9_000_000, targetBytes: 1_000_000, runRung: run,
+    })
+    expect(outcome.status).toBe('floor-reached')
+    expect(outcome.bytes).toBe(3_000_000)
+    expect(outcome.rungIndex).toBe(0)
+  })
+
   it('reports floor-reached and keeps the floor output when the target is unsafe', async () => {
     // Every rung stays above target.
     const { run, calls } = fakeRunner(curve(50_000_000, 100_000))
@@ -845,18 +1000,56 @@ describe('compress', () => {
     expect(outcome.outputPath).toBe(`/tmp/rung-${outcome.rungIndex}.pdf`)
   })
 
-  it('reports progress for every rung it actually runs', async () => {
+  it('reports a smaller attempt estimate in squeeze mode', async () => {
+    // Squeeze searches only four rungs, so reporting the normal-mode estimate
+    // of 6 would leave the progress bar apparently stuck below half throughout.
+    const onProgress = vi.fn()
+    const sizes = curve(50_000_000, 100_000)
+    sizes[15] = 1_000_000
+    const { run } = fakeRunner(sizes)
+    await compress({
+      ...base, allowSqueeze: true, inputBytes: 60_000_000,
+      targetBytes: 1_750_000, runRung: run, onProgress,
+    })
+    for (const call of onProgress.mock.calls) {
+      expect(call[0].estimatedTotal).toBe(3)
+    }
+  })
+
+  it('reports progress twice per rung: once starting, once measured', async () => {
     const onProgress = vi.fn()
     const { run, calls } = fakeRunner(curve(10_000_000, 500_000))
     await compress({
       ...base, inputBytes: 12_000_000, targetBytes: 7_200_000, runRung: run, onProgress,
     })
-    expect(onProgress).toHaveBeenCalledTimes(calls.length)
+    expect(onProgress).toHaveBeenCalledTimes(calls.length * 2)
+
     const first = onProgress.mock.calls[0]![0]
     expect(first.attempt).toBe(1)
     expect(first.rungIndex).toBe(0)
     expect(first.estimatedTotal).toBeGreaterThan(0)
     expect(first.rungLabel).toBe(RUNGS[0]!.label)
+    expect(first.bytes).toBeNull()
+
+    const second = onProgress.mock.calls[1]![0]
+    expect(second.attempt).toBe(1)
+    expect(second.rungIndex).toBe(0)
+    expect(second.bytes).toBe(10_000_000)
+  })
+
+  it('never reports a size it did not measure', async () => {
+    // Every populated `bytes` must equal what the runner actually returned for
+    // that rung. A progress display showing inferred sizes as measurements
+    // would be worse than showing none.
+    const onProgress = vi.fn()
+    const sizes = curve(10_000_000, 500_000)
+    const { run } = fakeRunner(sizes)
+    await compress({
+      ...base, inputBytes: 12_000_000, targetBytes: 7_200_000, runRung: run, onProgress,
+    })
+    for (const [event] of onProgress.mock.calls) {
+      if (event.bytes !== null) expect(event.bytes).toBe(sizes[event.rungIndex])
+    }
   })
 
   it('propagates runner errors instead of swallowing them', async () => {
@@ -898,8 +1091,15 @@ export interface CompressOptions {
   onProgress?: (progress: CompressProgress) => void
 }
 
-/** Rung 0 + the floor probe + ceil(log2(11)) binary-search steps. */
-export const ESTIMATED_ATTEMPTS = 6
+/** Rung 0 + the floor probe + ceil(log2(21)) binary-search steps. */
+export const ESTIMATED_ATTEMPTS = 7
+
+/**
+ * Squeeze mode probes rung 26 then binary-searches the three rungs above it:
+ * at most three passes, not four. Reporting the normal-mode estimate would
+ * leave the progress bar apparently stuck below half for the whole run.
+ */
+export const ESTIMATED_SQUEEZE_ATTEMPTS = 3
 
 export async function compress(opts: CompressOptions): Promise<CompressOutcome> {
   const { targetBytes, allowSqueeze, runRung, onProgress } = opts
@@ -913,15 +1113,21 @@ export async function compress(opts: CompressOptions): Promise<CompressOutcome> 
 
     const rung = RUNGS[index]!
     attempts++
-    onProgress?.({
+    // Each attempt reports twice: once on start so the UI can say what is
+    // being tried during a pass that may take several seconds, and once on
+    // completion carrying the measured size. The completion event is the only
+    // place an intermediate attempt's real size is ever available.
+    const event = {
       attempt: attempts,
-      estimatedTotal: ESTIMATED_ATTEMPTS,
+      estimatedTotal: allowSqueeze ? ESTIMATED_SQUEEZE_ATTEMPTS : ESTIMATED_ATTEMPTS,
       rungIndex: index,
       rungLabel: rung.label,
       dpi: rung.dpi,
-    })
+    }
+    onProgress?.({ ...event, bytes: null })
     const result = await runRung(rung)
     measured.set(index, result)
+    onProgress?.({ ...event, bytes: result.bytes })
     return result
   }
 
@@ -958,10 +1164,24 @@ export async function compress(opts: CompressOptions): Promise<CompressOutcome> 
   const lowest = allowSqueeze ? FLOOR_INDEX + 1 : 1
   const harshest = allowSqueeze ? MAX_INDEX : FLOOR_INDEX
 
-  // If the harshest permitted rung still misses, nothing between it and rung 0 can fit.
+  // If the harshest permitted rung still misses, nothing between it and rung 0
+  // can fit — but the harshest rung is not necessarily the *smallest* result we
+  // have. On documents that are not image-dominated, rung 0's lossless Flate
+  // can beat the floor's heavy JPEG: measured on a 200-page text document with
+  // one flat-colour logo, rung 0 = 104,229 bytes against the floor's 104,827.
+  // Returning the floor there would hand the user a file that is both larger
+  // and visibly worse while a better one sits in the same directory.
   const harshestResult = await run(harshest)
   if (harshestResult.bytes > targetBytes) {
-    return done(allowSqueeze ? 'impossible' : 'floor-reached', harshest, harshestResult)
+    let bestIdx = harshest
+    let bestRes = harshestResult
+    for (const [index, result] of measured) {
+      if (result.bytes < bestRes.bytes) {
+        bestIdx = index
+        bestRes = result
+      }
+    }
+    return done(allowSqueeze ? 'impossible' : 'floor-reached', bestIdx, bestRes)
   }
 
   // Binary search for the lowest index (= highest quality) that fits. `best` only
@@ -1109,7 +1329,7 @@ Expected: PASS, 4 tests.
 # Downloads and prepares the Ghostscript binaries this app bundles.
 # Run once before the first build. Output is gitignored.
 #
-# Prerequisites on macOS:  xcode-select --install ; brew install p7zip
+# Prerequisites on macOS:  xcode-select --install ; brew install sevenzip
 set -euo pipefail
 
 GS_VERSION="10.07.1"
@@ -1131,12 +1351,36 @@ fi
 echo "sha256: $(shasum -a 256 "${WIN_EXE}" | cut -d' ' -f1)"
 echo "Compare against the checksums published at ${BASE%/download/*}/tag/${GS_TAG}"
 
-command -v 7z >/dev/null 2>&1 || { echo "7z not found. Run: brew install p7zip"; exit 1; }
+# Use 7zz from the `sevenzip` formula, NOT `7z` from `p7zip`. p7zip 17.05
+# (2017) cannot read this NSIS installer: it silently extracts only the UI
+# plugin DLLs and reports "Unexpected end of input stream". That failure is
+# especially nasty because the output *looks* present but is wrong.
+command -v 7zz >/dev/null 2>&1 || { echo "7zz not found. Run: brew install sevenzip"; exit 1; }
 rm -rf "${WORK}/win-extract"
-7z x -o"${WORK}/win-extract" "${WIN_EXE}" > /dev/null
-cp "${WORK}/win-extract/bin/gswin64c.exe" "${ROOT}/resources/gs/win/"
-cp "${WORK}/win-extract/bin/gsdll64.dll"  "${ROOT}/resources/gs/win/"
-echo "OK: resources/gs/win/"
+7zz x -aoa -o"${WORK}/win-extract" "${WIN_EXE}" > /dev/null
+
+# Verify in the extraction directory and install only once it passes. Copying
+# first and checking after would leave files this script just rejected sitting
+# exactly where packaging looks for them — and `exit 1` protects only callers
+# who actually check the exit status.
+SRC_DLL="${WORK}/win-extract/bin/gsdll64.dll"
+SRC_EXE="${WORK}/win-extract/bin/gswin64c.exe"
+[ -f "${SRC_DLL}" ] && [ -f "${SRC_EXE}" ] \
+  || { echo "ERROR: extraction produced no bin/gsdll64.dll and bin/gswin64c.exe."; exit 1; }
+
+# Verify the payload rather than relying on the extractor's exit status. The
+# real gsdll64.dll is ~25 MB; the bogus installer-UI plugin DLLs that a bad
+# extraction produces are a few KB, so a size floor catches it precisely.
+DLL_SIZE=$(stat -f%z "${SRC_DLL}" 2>/dev/null || stat -c%s "${SRC_DLL}")
+if [ "${DLL_SIZE}" -lt $((20 * 1024 * 1024)) ]; then
+  echo "ERROR: gsdll64.dll is only ${DLL_SIZE} bytes (expected ~25 MB)."
+  echo "That is the signature of a partial extraction. Refusing to install."
+  exit 1
+fi
+
+cp "${SRC_EXE}" "${ROOT}/resources/gs/win/"
+cp "${SRC_DLL}" "${ROOT}/resources/gs/win/"
+echo "OK: resources/gs/win/ (gsdll64.dll ${DLL_SIZE} bytes)"
 
 # --- macOS: build from source so the binary needs no external libraries -------
 say "macOS binary (building from source)"
@@ -1150,46 +1394,76 @@ rm -rf "${WORK}/src"
 mkdir -p "${WORK}/src"
 tar xf "${SRC_TGZ}" -C "${WORK}/src" --strip-components=1
 
-build_arch() {
-  local arch="$1"
-  say "  building ${arch}"
-  ( cd "${WORK}/src"
-    make distclean >/dev/null 2>&1 || true
-    ./configure --without-x --disable-cups --disable-dbus \
-                --disable-gtk --without-tesseract \
-                --host="${arch}-apple-darwin" \
-                CC="clang -arch ${arch}" CXX="clang++ -arch ${arch}" >/dev/null
-    make -j"$(sysctl -n hw.ncpu)" >/dev/null
-    cp bin/gs "${WORK}/gs-${arch}" )
-}
-
+# Native arch only. Both users of this app are on Apple Silicon or Windows, so
+# an x86_64 slice would be dead weight — and cross-compiling Ghostscript is the
+# single most fragile step in this build. If an Intel Mac ever needs support,
+# run this script on one and `lipo -create` the two binaries together.
 NATIVE_ARCH="$(uname -m)"
-OTHER_ARCH=$([ "${NATIVE_ARCH}" = "arm64" ] && echo "x86_64" || echo "arm64")
-
-build_arch "${NATIVE_ARCH}"
-
-if build_arch "${OTHER_ARCH}"; then
-  lipo -create -output "${ROOT}/resources/gs/mac/gs" \
-       "${WORK}/gs-${NATIVE_ARCH}" "${WORK}/gs-${OTHER_ARCH}"
-  echo "OK: universal binary"
-else
-  cp "${WORK}/gs-${NATIVE_ARCH}" "${ROOT}/resources/gs/mac/gs"
-  echo "WARNING: the ${OTHER_ARCH} build failed. resources/gs/mac/gs is ${NATIVE_ARCH}-only."
-  echo "The app will not run on ${OTHER_ARCH} Macs. To fix, run this script on an"
-  echo "${OTHER_ARCH} Mac and lipo the two binaries together, or see the dylibbundler"
-  echo "fallback documented in README.md."
-fi
-
-chmod +x "${ROOT}/resources/gs/mac/gs"
+say "  building ${NATIVE_ARCH}"
+# The build runs with a sanitised PATH so Homebrew's pkg-config is never found.
+# Without this, configure autodetects Homebrew libraries and links them: an
+# earlier build picked up /opt/homebrew/.../libidn.12.dylib, producing a binary
+# that ran perfectly on the build machine and would fail everywhere else.
+# libidn only provides Unicode-password support for encrypted PDFs, which this
+# app reports as an error rather than decrypting, so we do not want it at all.
+# Ghostscript vendors its own zlib/libpng/jpeg/freetype/lcms2/openjpeg, so
+# hiding the system package manager costs nothing.
+( cd "${WORK}/src"
+  export PATH="/usr/bin:/bin:/usr/sbin:/sbin"
+  # CC/CXX/CFLAGS are unset too: a shell profile that points CC at a Homebrew
+  # compiler (common advice for keg-only formulas) would reintroduce Homebrew's
+  # default library search paths even with everything else sanitised.
+  unset PKG_CONFIG_PATH PKG_CONFIG_LIBDIR CPPFLAGS LDFLAGS CC CXX CFLAGS
+  make distclean >/dev/null 2>&1 || true
+  ./configure --without-x --disable-cups --disable-dbus \
+              --disable-gtk --without-tesseract \
+              --disable-fontconfig --without-libidn --without-libpaper >/dev/null
+  make -j"$(sysctl -n hw.ncpu)" >/dev/null
+  # Staged, not installed. The verification section below moves it into
+  # resources/gs/mac/ only after every check passes.
+  cp bin/gs "${WORK}/gs-candidate" )
 
 say "Verifying"
-echo "arch:    $(lipo -archs "${ROOT}/resources/gs/mac/gs")"
-echo "version: $("${ROOT}/resources/gs/mac/gs" --version)"
+
+# The candidate is verified at a staging path and only moved into
+# resources/gs/mac/ once every check passes. Copying first and checking after
+# would leave a binary this script just rejected sitting exactly where
+# packaging looks for it — and "exit 1" only protects callers who check it.
+CANDIDATE="${WORK}/gs-candidate"
+FINAL="${ROOT}/resources/gs/mac/gs"
+
+fail() { echo "ERROR: $1"; echo "Refusing to install the binary."; rm -f "${CANDIDATE}"; exit 1; }
+
+# Each check is a standalone assignment, NOT a command substitution inside
+# echo. `set -e` ignores a failing $(...) embedded in an echo argument, so
+# `echo "version: $("${BIN}" --version)"` silently continues on a broken
+# binary. Standalone `var=$(...)` assignments are covered.
+ARCHS=$(lipo -archs "${CANDIDATE}") || fail "lipo could not read the binary — it is not a valid Mach-O."
+VERSION=$("${CANDIDATE}" --version) || fail "the binary does not execute."
+LINKS=$(otool -L "${CANDIDATE}") || fail "otool could not read the binary."
+
+DEPS=$(printf '%s\n' "${LINKS}" | tail -n +2)
+# An empty dependency list means otool produced nothing useful. Without this,
+# `grep -v` over zero lines exits 1 — indistinguishable from a genuinely clean
+# binary — so the gate would pass vacuously for a corrupt file.
+[ -n "${DEPS}" ] || fail "otool produced no dependency lines; cannot verify."
+
+echo "arch:    ${ARCHS}"
+echo "version: ${VERSION}"
 echo "links:"
-otool -L "${ROOT}/resources/gs/mac/gs" | tail -n +2
+printf '%s\n' "${DEPS}"
 echo
-echo "Every line above must be under /usr/lib or /System. Anything under"
-echo "/opt/homebrew or /usr/local means the binary is NOT self-contained."
+
+# Hard gate: refuse to ship a binary depending on anything outside the OS.
+# This has already caught two real failures (Homebrew libidn, Homebrew
+# fontconfig), so it is an assertion, not a formality.
+if printf '%s\n' "${DEPS}" | grep -qvE '^[[:space:]]+(/usr/lib/|/System/)'; then
+  fail "the binary links a non-system library (listed above). It would run here and fail on every other Mac."
+fi
+
+mv "${CANDIDATE}" "${FINAL}"
+chmod +x "${FINAL}"
+echo "OK: binary is self-contained, installed at resources/gs/mac/gs"
 ```
 
 - [ ] **Step 6: Run the fetch script**
@@ -1304,13 +1578,33 @@ function encodePng(width, height, pixels) {
   ])
 }
 
-/** Deterministic pseudo-random noise. Noise does not compress, so the PDF stays big. */
-function noiseImage(width, height, seed) {
+/**
+ * Deterministic page image resembling a scan: smooth tonal variation, a few
+ * darker blotches, and light grain. This is what real scanned paper looks like
+ * to a compressor — spatially correlated, so downsampling and JPEG both bite.
+ *
+ * `Math.imul` is required, not decoration. The obvious `s * 1103515245`
+ * exceeds float64's safe integer range, and the resulting precision loss
+ * collapses the sequence into a repeating pattern: measured deflate ratio
+ * 0.0199 versus 1.0003 for this version. That bug made each page compress to
+ * ~46 KB instead of ~4.6 MB, which is why an earlier fixture needed 190 pages
+ * to reach 8 MB.
+ */
+function scanPageImage(width, height, seed) {
   const px = Buffer.alloc(width * height * 3)
-  let s = seed
-  for (let i = 0; i < px.length; i++) {
-    s = (s * 1103515245 + 12345) & 0x7fffffff
-    px[i] = (s >> 16) & 0xff
+  let s = seed | 0
+  for (let y = 0; y < height; y++) {
+    for (let x = 0; x < width; x++) {
+      s = (Math.imul(s, 1103515245) + 12345) | 0
+      const grain = ((s >>> 16) & 0x1f) - 16
+      const tone = 128 + 80 * Math.sin(x / 90) * Math.cos(y / 110) + 40 * Math.sin((x + y) / 50)
+      const blotch = (x * x + y * y) % 9973 < 600 ? -70 : 0
+      const v = Math.max(0, Math.min(255, Math.round(tone + grain + blotch)))
+      const i = (y * width + x) * 3
+      px[i] = v
+      px[i + 1] = v
+      px[i + 2] = v
+    }
   }
   return encodePng(width, height, px)
 }
@@ -1335,8 +1629,11 @@ async function makeTextHeavy() {
 
 async function makeScanHeavy() {
   const doc = await PDFDocument.create()
-  for (let p = 0; p < 12; p++) {
-    const png = await doc.embedPng(noiseImage(1100, 1400, 7919 + p * 104729))
+  // 1700x2200 into a US Letter page is ~200 DPI, a realistic scan resolution.
+  // Three pages is enough to exceed 8 MB and keeps integration tests fast —
+  // every Ghostscript pass in the search runs over this whole file.
+  for (let p = 0; p < 3; p++) {
+    const png = await doc.embedPng(scanPageImage(1700, 2200, 7919 + p * 104729))
     const page = doc.addPage([612, 792])
     page.drawImage(png, { x: 0, y: 0, width: 612, height: 792 })
   }
@@ -1380,7 +1677,7 @@ scan-heavy.pdf       8.xx MB
 already-tiny.pdf     0.00 MB
 ```
 
-`scan-heavy.pdf` must exceed 8 MB. If it does not, raise the page count in `makeScanHeavy` from 12 until it does.
+`scan-heavy.pdf` must exceed 8 MB. Three pages at 1700x2200 gives ~13.5 MB. If it falls short, raise the page count rather than the resolution.
 
 - [ ] **Step 5: Commit**
 
@@ -1410,12 +1707,13 @@ git commit -m "test: add generated PDF fixtures"
 `tests/integration/gs-run.test.ts`:
 
 ```ts
-import { mkdtempSync, rmSync, statSync, existsSync } from 'node:fs'
+import { execFileSync } from 'node:child_process'
+import { mkdtempSync, rmSync, statSync, existsSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 import { GsError, makeRungRunner, runGs } from '../../src/main/gs-run'
-import { RUNGS } from '../../src/main/ladder'
+import { RUNGS, FLOOR_INDEX, MAX_INDEX } from '../../src/main/ladder'
 import { resolveGhostscriptPath } from '../../src/main/gs-locate'
 
 const GS = resolveGhostscriptPath({
@@ -1471,14 +1769,60 @@ describe('makeRungRunner', () => {
     expect(result.bytes).toBeLessThan(statSync(SCAN).size / 2)
   })
 
-  it('aborts when the signal fires', async () => {
+  it('aborts when the signal fires, with no Node error code', async () => {
     const controller = new AbortController()
     const run = makeRungRunner({
       gsPath: GS, inputPath: SCAN, workDir: work, signal: controller.signal,
     })
     const pending = run(RUNGS[1]!)
     setTimeout(() => controller.abort(), 50)
-    await expect(pending).rejects.toThrow()
+    // `code: null` is what marks this a genuine cancellation rather than a
+    // failure to start, so assert it rather than merely that it rejected.
+    await expect(pending).rejects.toMatchObject({ exitCode: null, code: null })
+  })
+
+  it('reports a missing binary with its Node error code, not as a cancellation', async () => {
+    // A spawn failure and a user cancellation both produce exitCode: null.
+    // Without the code, a broken installation is reported to the user as
+    // "Cancelled." — which tells them nothing and blames them for it.
+    const run = makeRungRunner({
+      gsPath: '/nonexistent/path/to/gs', inputPath: SCAN, workDir: work,
+    })
+    await expect(run(RUNGS[5]!)).rejects.toMatchObject({ code: 'ENOENT' })
+  })
+
+  // The spec promises text is never rasterized at ANY rung, and transparency
+  // groups are where Ghostscript is most likely to break that by flattening a
+  // region to pixels. Checked at the floor and at the harshest rung.
+  it('keeps text selectable through a transparency group at the harshest rungs', async () => {
+    const { PDFDocument, StandardFonts, rgb } = await import('pdf-lib')
+    const doc = await PDFDocument.create()
+    const font = await doc.embedFont(StandardFonts.Helvetica)
+    const page = doc.addPage([612, 792])
+    // Semi-transparent coloured text: pdf-lib emits an ExtGState with /ca,
+    // which is what creates the transparency group.
+    page.drawText('TRANSPARENCY_GROUP_SENTINEL', {
+      x: 50, y: 700, size: 24, font, color: rgb(0.9, 0.1, 0.1), opacity: 0.5,
+    })
+    page.drawText('OPAQUE_CONTROL_SENTINEL', {
+      x: 50, y: 650, size: 24, font, color: rgb(0, 0, 0),
+    })
+    const src = join(work, 'transparency.pdf')
+    writeFileSync(src, await doc.save())
+
+    const run = makeRungRunner({ gsPath: GS, inputPath: src, workDir: work })
+    for (const index of [FLOOR_INDEX, MAX_INDEX]) {
+      const result = await run(RUNGS[index]!)
+      const text = execFileSync(
+        GS,
+        ['-sDEVICE=txtwrite', '-dNOPAUSE', '-dBATCH', '-dQUIET', '-o', '-', '-f', result.path],
+        { encoding: 'utf8', maxBuffer: 32 * 1024 * 1024 },
+      )
+      expect(text, `rung ${index} lost the transparent text`)
+        .toContain('TRANSPARENCY_GROUP_SENTINEL')
+      expect(text, `rung ${index} lost the opaque text`)
+        .toContain('OPAQUE_CONTROL_SENTINEL')
+    }
   })
 })
 ```
@@ -1505,6 +1849,14 @@ export class GsError extends Error {
     message: string,
     readonly exitCode: number | null,
     readonly stderr: string,
+    /**
+     * The originating Node error code when the process could not be started
+     * at all — `ENOENT` for a missing binary, `EACCES` for one that isn't
+     * executable. Without this, a spawn failure and a user cancellation are
+     * indistinguishable downstream (both carry `exitCode: null`), and a broken
+     * installation gets reported to the user as "Cancelled."
+     */
+    readonly code: string | null = null,
   ) {
     super(message)
     this.name = 'GsError'
@@ -1537,7 +1889,10 @@ export function runGs(gsPath: string, args: string[], signal?: AbortSignal): Pro
 
     child.on('error', (err) => {
       cleanup()
-      reject(new GsError(err.message, null, stderr))
+      // Carry the Node error code through. `errors.ts` checks it before it
+      // checks `exitCode === null`, so this is what distinguishes "Ghostscript
+      // is missing" from "the user pressed Cancel".
+      reject(new GsError(err.message, null, stderr, (err as NodeJS.ErrnoException).code ?? null))
     })
 
     child.on('close', (code) => {
@@ -1572,10 +1927,29 @@ export function makeRungRunner(cfg: RungRunnerConfig): RungRunner {
 Run: `npm run test:integration -- gs-run`
 Expected: PASS, 6 tests. This runs real Ghostscript several times and may take 30–60 seconds.
 
-- [ ] **Step 5: Record the real ladder curve and tune the QFactor table**
+- [ ] **Step 5: Confirm the ladder curve still holds**
 
-This is the empirical check the spec's open items call for. Add this temporary
-test to `tests/integration/gs-run.test.ts`:
+The QFactor table has already been tuned empirically against real Ghostscript
+output, and the spec's open item on it is closed. Measured on
+`tests/fixtures/scan-heavy.pdf` (13,563,981 bytes), the curve is strictly
+monotonic with no inversions:
+
+```
+rung  0  13,133,058   (lossless)   rung  8     312,400
+rung  1   5,927,838                rung  9     201,722
+rung  2   5,352,540                rung 10     124,471
+rung  3   4,342,602                rung 11      56,212  <- floor
+rung  4   2,935,063                rung 12      37,536
+rung  5   1,530,126                rung 13      26,489
+rung  6     890,054                rung 14      18,994
+rung  7     472,627                rung 15      13,935
+```
+
+Your job is to confirm this still holds after your changes, not to re-tune it.
+Add this temporary test, run it, check the numbers are in the same shape, then
+delete it — the ladder-ordering assertions in `tests/unit/ladder.test.ts` guard
+the table from then on. If any rung is *larger* than the one above it, stop and
+report it: that would be a regression against a measured baseline.
 
 ```ts
 it('prints the real ladder curve', async () => {
@@ -1616,9 +1990,24 @@ git commit -m "feat: run Ghostscript per rung with cancellation and size measure
 
 The stderr patterns must be observed, not guessed. Step 1 observes them.
 
-- [ ] **Step 1: Observe real Ghostscript failure output**
+- [ ] **Step 1: Confirm the recorded Ghostscript failure output**
 
-Create two bad inputs and record exactly what Ghostscript says:
+These strings have already been captured from Ghostscript 10.07.1 on this
+machine, and the patterns in Step 4 are built from them:
+
+| input | stderr |
+|---|---|
+| a text file | `Error: /undefined in this` |
+| a missing path | `Error: /undefinedfilename in (/tmp/does-not-exist.pdf)` |
+| password-protected | `**** This file requires a password for access.` then `**** Error: Couldn't initialise file.` |
+| truncated PDF | `Catalog dictionary not located in file, unable to proceed` then `**** Error: Couldn't initialise file.` |
+
+Note that `Couldn't initialise file.` appears in **both** the encrypted and the
+corrupt cases, which is why the password pattern must be tested first.
+
+Re-run the commands below to confirm they still match on your machine. If any
+output differs, the observed output wins — update both the test and the
+patterns, and say so in your report.
 
 ```bash
 GS=./resources/gs/mac/gs
@@ -1665,13 +2054,26 @@ describe('classifyFailure', () => {
   })
 
   it('recognises a file that is not a readable PDF', () => {
+    // Every string here is real Ghostscript 10.07.1 output, captured by
+    // feeding it a text file, a truncated PDF, and a missing path.
     for (const stderr of [
+      'Error: /undefined in this',
+      'Catalog dictionary not located in file, unable to proceed\n   **** Error: Couldn\'t initialise file.',
       'Error: /syntaxerror in --file--',
       'Unrecoverable error, exit code 1',
-      '**** Cannot recover this file',
     ]) {
       expect(classifyFailure(gsErr(stderr)).kind).toBe('not-pdf')
     }
+  })
+
+  it('reports a password-protected PDF as encrypted, not as corrupt', () => {
+    // Ghostscript prints BOTH "requires a password" and "Couldn't initialise
+    // file." for a locked PDF. If the corrupt pattern were checked first,
+    // every encrypted file would get the wrong message.
+    const real =
+      'GPL Ghostscript 10.07.1: \n   **** This file requires a password for access.\n' +
+      "   **** Error: Couldn't initialise file.\n               Output may be incorrect."
+    expect(classifyFailure(gsErr(real)).kind).toBe('encrypted')
   })
 
   it('recognises a full disk from either Ghostscript or Node', () => {
@@ -1733,6 +2135,7 @@ import { GsError } from './gs-run'
 
 const MESSAGES: Record<FailureKind, string> = {
   'not-pdf': "This file isn't a readable PDF.",
+  'input-unreadable': "Couldn't open that file. It may have been moved, renamed, or deleted.",
   encrypted: 'This PDF is password-protected. Remove the password and try again.',
   'no-space': 'Ran out of disk space while compressing.',
   'gs-missing': "Something's wrong with this installation — please reinstall.",
@@ -1740,11 +2143,23 @@ const MESSAGES: Record<FailureKind, string> = {
   unknown: 'Compression failed on this file.',
 }
 
-// Patterns confirmed against Ghostscript 10.07 output. See Task 7 Step 1.
+// Patterns observed from Ghostscript 10.07.1 itself, not guessed. The exact
+// strings each one targets are recorded in Task 7 Step 1.
+//
+// Order matters: "Couldn't initialise file." appears in BOTH the encrypted and
+// the corrupt cases, so the password check must come first or every locked PDF
+// is reported as corrupt.
 const STDERR_PATTERNS: ReadonlyArray<[RegExp, FailureKind]> = [
+  // "**** This file requires a password for access."
   [/requires a password|invalid password|owner password/i, 'encrypted'],
   [/no space left|disk full/i, 'no-space'],
-  [/syntaxerror|unrecoverable error|cannot recover|not a pdf|undefined in/i, 'not-pdf'],
+  // "Catalog dictionary not located in file, unable to proceed" (truncated),
+  // "Error: /undefined in this" (not a PDF at all),
+  // "Couldn't initialise file." (generic unreadable input).
+  [
+    /catalog dictionary not located|couldn't initialise file|syntaxerror|unrecoverable error|cannot recover|not a pdf|undefined in/i,
+    'not-pdf',
+  ],
 ]
 
 function nodeErrorCode(err: unknown): string | null {
@@ -1894,14 +2309,30 @@ describe('compressFile', () => {
     await cleanupWorkDir(res.outcome.outputPath!)
   }, 300_000)
 
-  it('returns a failure rather than throwing on a non-PDF', async () => {
+  it('reports a missing input as unreadable, not as a broken installation', async () => {
+    // A missing input file and a missing Ghostscript binary both raise ENOENT.
+    // Telling someone whose PDF moved to reinstall the app is actively
+    // misleading, so this pins the distinction.
     const res = await compressFile({
       ...base, inputPath: join(FIXTURES, 'nope.pdf'), targetBytes: 1_750_000,
     })
     expect(res.ok).toBe(false)
     if (res.ok) return
-    expect(res.failure.message).toBeTruthy()
+    expect(res.failure.kind).toBe('input-unreadable')
+    expect(res.failure.message).toBe(
+      "Couldn't open that file. It may have been moved, renamed, or deleted.",
+    )
   })
+
+  it('still reports a genuinely missing Ghostscript as an installation problem', async () => {
+    const res = await compressFile({
+      ...base, gsPath: '/nonexistent/path/to/gs',
+      inputPath: SCAN, targetBytes: 1_750_000,
+    })
+    expect(res.ok).toBe(false)
+    if (res.ok) return
+    expect(res.failure.kind).toBe('gs-missing')
+  }, 60_000)
 
   it('reports progress in increasing attempt order', async () => {
     const seen: number[] = []
@@ -1927,7 +2358,7 @@ Expected: FAIL — cannot resolve `src/main/compress-file`.
 ```ts
 import { mkdtemp, rm, stat } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
-import { dirname, join } from 'node:path'
+import { basename, dirname, join, resolve } from 'node:path'
 import type { CompressProgress, CompressResponse } from '@shared/types'
 import { compress } from './compress'
 import { classifyFailure } from './errors'
@@ -1945,9 +2376,28 @@ export interface CompressFileOptions {
 const WORK_PREFIX = 'pdf-compressor-'
 
 export async function compressFile(opts: CompressFileOptions): Promise<CompressResponse> {
+  // Reading the input is checked separately from everything else. Both a
+  // missing input file and a missing Ghostscript binary raise ENOENT, and
+  // `classifyFailure` sees only the code — so without this, a PDF the user
+  // moved or renamed would be reported as "Something's wrong with this
+  // installation — please reinstall.", sending them to reinstall a working app
+  // while the real problem goes untouched.
+  let inputBytes: number
+  try {
+    inputBytes = (await stat(opts.inputPath)).size
+  } catch (err) {
+    return {
+      ok: false,
+      failure: {
+        kind: 'input-unreadable',
+        message: "Couldn't open that file. It may have been moved, renamed, or deleted.",
+        details: err instanceof Error ? (err.stack ?? err.message) : String(err),
+      },
+    }
+  }
+
   let workDir: string | null = null
   try {
-    const { size: inputBytes } = await stat(opts.inputPath)
     workDir = await mkdtemp(join(tmpdir(), WORK_PREFIX))
 
     const outcome = await compress({
@@ -1966,7 +2416,10 @@ export async function compressFile(opts: CompressFileOptions): Promise<CompressR
 
     // Nothing was produced, so nothing needs keeping.
     if (outcome.outputPath === null) {
-      await rm(workDir, { recursive: true, force: true })
+      // Guarded like the catch-path rm below. Without this, a filesystem
+      // hiccup while removing an empty temp dir would turn "your file is
+      // already small enough" into "Compression failed on this file."
+      await rm(workDir, { recursive: true, force: true }).catch(() => {})
     }
     return { ok: true, outcome }
   } catch (err) {
@@ -1980,8 +2433,15 @@ export async function compressFile(opts: CompressFileOptions): Promise<CompressR
  * saved the file or dismissed the result. Refuses paths outside our own temp dirs.
  */
 export async function cleanupWorkDir(outputPath: string): Promise<void> {
-  const dir = dirname(outputPath)
-  if (!dir.startsWith(join(tmpdir(), WORK_PREFIX))) return
+  // This deletes a directory recursively, so containment has to be exact.
+  // `dir.startsWith(prefix)` is not: `dirname()` does not collapse `..`, so
+  // `<tmp>/pdf-compressor-ABC/../../../../Users/me/.ssh/id_rsa` passes a prefix
+  // test while resolving somewhere else entirely — and that is where `rm` would
+  // operate. Resolve first, then require the parent to be exactly the temp
+  // directory and the basename to carry our prefix.
+  const dir = resolve(dirname(outputPath))
+  if (dirname(dir) !== resolve(tmpdir())) return
+  if (!basename(dir).startsWith(WORK_PREFIX)) return
   await rm(dir, { recursive: true, force: true }).catch(() => {})
 }
 ```
@@ -2067,13 +2527,46 @@ declare global {
 
 ```ts
 import { copyFile, stat } from 'node:fs/promises'
-import { join } from 'node:path'
+import { basename, join } from 'node:path'
 import { app, BrowserWindow, dialog, ipcMain } from 'electron'
 import type { CompressRequest, CompressResponse, PickedFile } from '@shared/types'
 import { cleanupWorkDir, compressFile } from './compress-file'
 import { resolveGhostscriptPath } from './gs-locate'
 
 let active: AbortController | null = null
+
+/**
+ * Output path of the most recent successful run, whose temp directory is still
+ * on disk because the user may yet save it.
+ *
+ * `compressFile` deliberately keeps that directory — the caller needs the file.
+ * But a run the user never saves would otherwise leak it, and each one holds
+ * every rung's output: roughly 27 MB for a 13.5 MB input. Someone compressing a
+ * few documents a week and saving only some of them would quietly accumulate
+ * hundreds of megabytes in a directory they will never think to look in.
+ *
+ * So the previous run's directory is removed when a new run starts, and any
+ * outstanding one is removed on quit.
+ */
+let pendingOutputPath: string | null = null
+
+/**
+ * The path a save dialog is currently open for, if any.
+ *
+ * A native save dialog can stay open for minutes. Without this, starting a new
+ * compression while one is open would delete the very file the user is about to
+ * save, and their Save would fail on a file that existed when they clicked.
+ */
+let savingPath: string | null = null
+
+async function discardPendingOutput(): Promise<void> {
+  const path = pendingOutputPath
+  if (!path) return
+  pendingOutputPath = null
+  // Deferred: `file:save` completes the discard once its dialog closes.
+  if (path === savingPath) return
+  await cleanupWorkDir(path)
+}
 
 /** Electron-aware wrapper around the pure resolver in gs-locate.ts. */
 function ghostscriptPath(): string {
@@ -2109,6 +2602,8 @@ export function registerIpc(): void {
 
   ipcMain.handle('compress:start', async (event, req: CompressRequest): Promise<CompressResponse> => {
     active?.abort()
+    // Whatever the last run produced is now superseded, saved or not.
+    await discardPendingOutput()
     const controller = new AbortController()
     active = controller
 
@@ -2123,7 +2618,23 @@ export function registerIpc(): void {
       },
     })
 
-    if (active === controller) active = null
+    // Both writes are guarded by the same check. An aborted run can still
+    // resolve `ok: true` — SIGKILL is not synchronous, so a run whose last
+    // Ghostscript process already closed successfully settles normally — and
+    // whichever handler settles last would otherwise win the write. That would
+    // point `pendingOutputPath` at a superseded run, leaving the current run's
+    // ~27 MB untracked and never cleaned up.
+    const isCurrent = active === controller
+    if (isCurrent) {
+      active = null
+      // Remember what to clean up if the user never saves this result.
+      if (response.ok && response.outcome.outputPath) {
+        pendingOutputPath = response.outcome.outputPath
+      }
+    } else if (response.ok && response.outcome.outputPath) {
+      // Superseded: nobody will ever save this, so release it now.
+      await cleanupWorkDir(response.outcome.outputPath)
+    }
     return response
   })
 
@@ -2133,21 +2644,51 @@ export function registerIpc(): void {
   })
 
   ipcMain.handle('file:save', async (event, req: { tempPath: string; suggestedName: string }) => {
-    const win = BrowserWindow.fromWebContents(event.sender)
-    const result = win
-      ? await dialog.showSaveDialog(win, { defaultPath: req.suggestedName })
-      : await dialog.showSaveDialog({ defaultPath: req.suggestedName })
-    if (result.canceled || !result.filePath) return false
-    await copyFile(req.tempPath, result.filePath)
-    await cleanupWorkDir(req.tempPath)
-    return true
+    savingPath = req.tempPath
+    let saved = false
+    try {
+      const win = BrowserWindow.fromWebContents(event.sender)
+      const options = { defaultPath: basename(req.suggestedName) }
+      const result = win
+        ? await dialog.showSaveDialog(win, options)
+        : await dialog.showSaveDialog(options)
+      if (result.canceled || !result.filePath) return false
+      await copyFile(req.tempPath, result.filePath)
+      saved = true
+      return true
+    } catch {
+      // The source can legitimately be gone by now. Report a clean failure
+      // rather than letting a raw IPC rejection reach the renderer.
+      return false
+    } finally {
+      savingPath = null
+      if (saved) {
+        if (pendingOutputPath === req.tempPath) pendingOutputPath = null
+        await cleanupWorkDir(req.tempPath)
+      } else if (pendingOutputPath !== req.tempPath) {
+        // A newer run superseded this one while the dialog was open, and
+        // `discardPendingOutput` deferred to us. Complete the discard.
+        await cleanupWorkDir(req.tempPath)
+      }
+      // Cancelled but still the pending result: keep it, the user may retry.
+    }
   })
 }
 
-/** Called on quit so a killed run leaves nothing behind. */
-export function abortActiveCompression(): void {
+/**
+ * Called on quit so nothing is left behind — neither a running Ghostscript
+ * process nor the temp directory of a result the user never saved.
+ *
+ * This is async and must be awaited. Electron does not hold up quit for a
+ * `before-quit` listener unless that listener calls `preventDefault()` and
+ * quits again itself, so a fire-and-forget `rm` here is not "slightly delayed"
+ * — it usually does not happen at all.
+ */
+export async function shutdown(): Promise<void> {
   active?.abort()
   active = null
+  savingPath = null
+  await discardPendingOutput()
 }
 ```
 
@@ -2182,7 +2723,7 @@ contextBridge.exposeInMainWorld('api', api)
 In `src/main/index.ts`, add the import and wire it up:
 
 ```ts
-import { abortActiveCompression, registerIpc } from './ipc'
+import { registerIpc, shutdown } from './ipc'
 ```
 
 Change the `app.whenReady()` block to:
@@ -2196,7 +2737,16 @@ app.whenReady().then(() => {
   })
 })
 
-app.on('before-quit', abortActiveCompression)
+// Electron will not wait for an async `before-quit` listener, so hold the quit
+// open, finish cleaning up, then exit for real. Without this the temp directory
+// of an unsaved result usually survives the quit.
+let quitting = false
+app.on('before-quit', (event) => {
+  if (quitting) return
+  event.preventDefault()
+  quitting = true
+  void shutdown().finally(() => app.exit(0))
+})
 ```
 
 - [ ] **Step 5: Verify it compiles and the app still runs**
@@ -2694,7 +3244,7 @@ extraResources:
 mac:
   target:
     - target: dmg
-      arch: [universal]
+      arch: [arm64]
   category: public.app-category.utilities
   # Unsigned build. See README for the one-time Gatekeeper step.
   identity: null
@@ -2711,14 +3261,14 @@ nsis:
 - [ ] **Step 2: Build the macOS installer**
 
 Run: `npm run pack:mac`
-Expected: `release/PDF Compressor-0.1.0-universal.dmg` exists.
+Expected: `release/PDF Compressor-0.1.0-arm64.dmg` exists.
 
-If electron-builder errors that the universal target needs both architectures and `resources/gs/mac/gs` is single-architecture, change `arch: [universal]` to `arch: [arm64]` and note in the README that Intel Macs need a separate build.
+The macOS build is **arm64 only** by design — both users of this app are on Apple Silicon or Windows. Do not switch this to `universal`: `resources/gs/mac/gs` is a single-architecture binary and a universal target would fail on it.
 
 - [ ] **Step 3: Verify Ghostscript survived packaging**
 
 ```bash
-hdiutil attach "release/PDF Compressor-0.1.0-universal.dmg"
+hdiutil attach "release/PDF Compressor-0.1.0-arm64.dmg"
 ls -la "/Volumes/PDF Compressor/PDF Compressor.app/Contents/Resources/gs/"
 "/Volumes/PDF Compressor/PDF Compressor.app/Contents/Resources/gs/gs" --version
 hdiutil detach "/Volumes/PDF Compressor"
@@ -2791,11 +3341,13 @@ npm run fixtures    # generates test PDFs
 npm run dev
 ```
 
-`npm run fetch-gs` needs the Xcode command line tools and `p7zip`:
+`npm run fetch-gs` needs the Xcode command line tools and `sevenzip` (the
+`p7zip` formula is too old to read Ghostscript's Windows installer — it extracts
+the wrong files without reporting an error):
 
 ```bash
 xcode-select --install
-brew install p7zip
+brew install sevenzip
 ```
 
 ### Tests

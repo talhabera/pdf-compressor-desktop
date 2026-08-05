@@ -60,39 +60,51 @@ rung is a pair of Ghostscript settings: image resolution (DPI) and JPEG quality
 (expressed to Ghostscript as a `QFactor`). Rungs are ordered from gentlest to
 harshest.
 
-| Rung | DPI | JPEG q | QFactor | Notes |
-|---|---|---|---|---|
-| 0 | — | — | — | Structural only: dedupe images, subset fonts, recompress streams. Zero quality loss. |
-| 1 | 250 | 90 | 0.15 | |
-| 2 | 220 | 85 | 0.20 | |
-| 3 | 200 | 82 | 0.25 | |
-| 4 | 180 | 80 | 0.30 | |
-| 5 | 150 | 75 | 0.40 | |
-| 6 | 130 | 70 | 0.50 | |
-| 7 | 110 | 65 | 0.65 | |
-| 8 | 100 | 60 | 0.80 | |
-| 9 | 90 | 55 | 1.00 | |
-| 10 | 80 | 50 | 1.30 | |
-| 11 | 72 | 40 | 2.00 | Also converts to grayscale. **Readability floor.** |
-| 12 | 60 | 35 | 2.40 | Beyond floor — "Squeeze harder" only |
-| 13 | 50 | 30 | 3.00 | Beyond floor |
-| 14 | 40 | 25 | 3.50 | Beyond floor |
-| 15 | 30 | 20 | 4.00 | Beyond floor |
+| Rung | DPI | QFactor | Notes |
+|---|---|---|---|
+| 0 | — | — | Structural only. No image-quality loss — requires forcing `FlateEncode`, since `pdfwrite`'s `AutoFilter` default silently applies lossy JPEG. Note this is *not* byte-preserving: `pdfwrite` rewrites the document, and interactive form fields and signatures are lost at every rung including this one (see below). |
+| 1–8 | 250 → 166 | 0.15 → 0.34 | high quality |
+| 9–15 | 158 → 110 | 0.37 → 0.65 | reduced image quality |
+| 16–22 | 102 → 72 | 0.72 → 2.00 | heavily compressed; **22 is the readability floor** |
+| 23–26 | 60 → 30 | 2.40 → 4.00 | beyond the floor — "Squeeze harder" only |
 
-Rung 11 is the **readability floor**: the harshest setting the app will apply
-without the user explicitly asking for more. Rungs 12–15 are reachable only via
+The steps are deliberately fine, 12–19% apart in output size. Step size is
+quality the user paid for and did not receive: the search returns the largest
+result that still fits, so a coarse ladder overshoots downward. Measured on a
+23.8 MB 300 DPI colour scan at a 1.75 MB target, a coarser table returned
+1,363,051 bytes (78% of the budget, 150 DPI) where this one returns 1,645,323
+(94%, 166 DPI) — the same file size, visibly sharper images.
+
+JPEG chroma is subsampled 4:2:0 at every rung: colour at half resolution,
+brightness untouched. Measured 5.5–10.5% smaller for −0.01 dB, which is noise.
+
+Rung 22 is the **readability floor**: the harshest setting the app will apply
+without the user explicitly asking for more. Rungs 23–26 are reachable only via
 the "Squeeze harder" button.
 
 Text and vector content is never rasterized at any rung. Ghostscript's `pdfwrite`
 device re-encodes embedded raster images only; glyphs stay glyphs and remain
-selectable and searchable in the output at every rung, including 15. The
-grayscale conversion at rung 11+ affects color rendering, not text fidelity.
+selectable and searchable in the output at every rung, including 26.
 
-The `QFactor` values above are a starting table derived from the conventional
-Ghostscript quality mapping (roughly `QFactor ≈ (100 − q) / 25` through the
-mid-range). They are to be validated empirically against the test fixtures during
-implementation and adjusted so that output size decreases smoothly across the
-ladder.
+**Interactive form fields and digital signatures are lost at every rung**,
+including rung 0. Ghostscript's `pdfwrite` rebuilds the document and cannot
+carry an AcroForm through. Verified directly: a PDF with a filled text field, a
+checked checkbox, a link, a bookmark and metadata came back with the link,
+bookmark, metadata and all visible text intact, and the AcroForm gone. The
+practical consequence is that a signed document is returned looking identical
+and silently unsigned. This is not fixable within Ghostscript, so the
+obligation is to say so plainly wherever the app claims to lose nothing.
+
+**Colour is preserved at every rung.** An earlier version of this design
+converted rungs 11 and below to grayscale (in a coarser 16-rung table), which bought 37–52% but turned colour
+documents black and white — a change to the document's *content*, not its
+quality. The app never makes that decision on the user's behalf. If a target is
+only reachable by discarding colour, the honest answer is to report the smallest
+size achievable and let the user decide.
+
+The `QFactor` values above are measured, not derived: the whole table was run
+against a real 300 DPI colour scan and confirmed strictly monotonic with 12–19%
+steps.
 
 ### Ghostscript invocation
 
@@ -110,7 +122,7 @@ gs -sDEVICE=pdfwrite -dCompatibilityLevel=1.7 \
    -sOutputFile=<out> -f <in>
 ```
 
-Rungs 1–15:
+Rungs 1–26:
 
 ```
 gs -sDEVICE=pdfwrite -dCompatibilityLevel=1.7 \
@@ -126,12 +138,11 @@ gs -sDEVICE=pdfwrite -dCompatibilityLevel=1.7 \
    -dMonoImageResolution=<max(DPI*2, 300)> \
    -dAutoFilterColorImages=false -dColorImageFilter=/DCTEncode \
    -dAutoFilterGrayImages=false  -dGrayImageFilter=/DCTEncode \
-   [-sColorConversionStrategy=Gray -dProcessColorModel=/DeviceGray]  # rung >= 11
    -sOutputFile=<out> \
-   -c "<</ColorACSImageDict <</QFactor <QF> /Blend 1 /HSamples [1 1 1 1] /VSamples [1 1 1 1]>>
-        /ColorImageDict    <</QFactor <QF> /Blend 1 /HSamples [1 1 1 1] /VSamples [1 1 1 1]>>
-        /GrayACSImageDict  <</QFactor <QF> /Blend 1 /HSamples [1 1 1 1] /VSamples [1 1 1 1]>>
-        /GrayImageDict     <</QFactor <QF> /Blend 1 /HSamples [1 1 1 1] /VSamples [1 1 1 1]>>
+   -c "<</ColorACSImageDict <</QFactor <QF> /Blend 1 /HSamples [2 1 1 1] /VSamples [2 1 1 1]>>
+        /ColorImageDict    <</QFactor <QF> /Blend 1 /HSamples [2 1 1 1] /VSamples [2 1 1 1]>>
+        /GrayACSImageDict  <</QFactor <QF> /Blend 1 /HSamples [2 1 1 1] /VSamples [2 1 1 1]>>
+        /GrayImageDict     <</QFactor <QF> /Blend 1 /HSamples [2 1 1 1] /VSamples [2 1 1 1]>>
        >> setdistillerparams" \
    -f <in>
 ```
@@ -147,20 +158,20 @@ Given an input file and a target byte count:
    do no work. The user is offered the original file unchanged.
 2. **Try rung 0.** If the structural pass alone lands at or under target, return
    it — the target is met with zero quality loss.
-3. **Try the floor (rung 11).** If even the floor exceeds target, the target is
+3. **Try the floor (rung 22).** If even the floor exceeds target, the target is
    not safely reachable. Keep the floor output, report *"smallest I could get
    without wrecking it: X MB"*, and offer **Squeeze harder** (see below).
-4. **Binary search rungs 1–10** for the highest-quality rung whose measured
+4. **Binary search rungs 1–21** for the highest-quality rung whose measured
    output is at or under target.
 
 **Squeeze harder** runs the same procedure over the beyond-floor rungs: try rung
-15 first, and if it lands at or under target, binary search rungs 12–15 for the
-highest-quality rung that fits. If rung 15 still exceeds target, the file cannot
-be compressed to that size by this tool at all — report the rung 15 size as the
+26 first, and if it lands at or under target, binary search rungs 23–26 for the
+highest-quality rung that fits. If rung 26 still exceeds target, the file cannot
+be compressed to that size by this tool at all — report the rung 26 size as the
 best achievable and stop.
 
-Worst case is about six Ghostscript passes. On a 20 MB scan this is roughly
-15–25 seconds, reported live.
+Worst case is about seven Ghostscript passes. On a 20 MB scan this is roughly
+18–28 seconds, reported live.
 
 ### Correctness invariant
 
@@ -257,7 +268,14 @@ script, `scripts/fetch-ghostscript.sh`, produces them, and the README documents
 running it once before the first build.
 
 **Windows.** Extract `gswin64c.exe` and `gsdll64.dll` from the official Ghostscript
-10.07 Windows release. These are self-contained; no further work is needed.
+10.07 Windows release. These are **not** self-contained: both dynamically link the
+Visual C++ 2015-2022 runtime (VCRUNTIME140.dll, VCRUNTIME140_1.dll, MSVCP140.dll),
+which Windows does not ship. `resources/gs/win/` also bundles the redistributable
+installer (`vcredist_x64.exe`, extracted from the same NSIS package) and
+`build/installer.nsh` runs it silently during setup. Without this, every
+compression fails with an opaque loader error (`STATUS_DLL_NOT_FOUND`) that
+produces no stderr at all — see Task 4's report for the full failure mode and
+`scripts/check-pe-imports.mjs` for the build-time dependency gate that catches it.
 
 **macOS.** Build from the official source tarball so the result depends only on
 system libraries. Ghostscript vendors its own libjpeg, libpng, zlib, freetype,
@@ -269,10 +287,14 @@ lcms2, and openjpeg, so a default build links nothing external:
 make
 ```
 
-Build separately for `arm64` and `x86_64`, combine with `lipo` into a universal
-binary, and verify with `otool -L` that only system libraries are referenced.
+Build for the **native architecture only** (`arm64`), and verify with `otool -L`
+that only system libraries are referenced. The two users of this app are on
+Apple Silicon and Windows respectively, so an x86_64 slice would be dead weight —
+and cross-compiling Ghostscript is the most fragile step in the whole build. If
+an Intel Mac ever needs support, run the script on one and `lipo -create` the two
+binaries together.
 
-**Contingency.** If the universal build proves troublesome, fall back to bundling
+**Contingency.** If the source build proves troublesome, fall back to bundling
 the Homebrew binary together with its dependencies via `dylibbundler`, which
 rewrites the install names into the app bundle. This is well-trodden but adds
 ~15 MB and more moving parts, so it is the second choice.
@@ -283,8 +305,12 @@ executable on first run if needed.
 
 ## Packaging and installation
 
-`electron-builder` produces a `.dmg` for macOS (universal) and an NSIS `.exe`
+`electron-builder` produces an arm64 `.dmg` for macOS and an NSIS `.exe`
 installer for Windows, both built from macOS.
+
+The Windows installer is the **primary deliverable**: one of the two users runs
+Windows, so a broken `.exe` means the app is unusable for half its audience,
+whereas the macOS build only ever has to satisfy the developer's own machine.
 
 Builds are **unsigned**. On first launch macOS will report that it "cannot check"
 the app; the README will document the one-time right-click → Open workaround with
@@ -302,7 +328,7 @@ install seamless; this is not planned for the first version.
 - A shallow curve where the optimum sits mid-ladder — asserts the search picks
   the *highest-quality* qualifying rung, not merely a qualifying one.
 - A curve where even the floor misses — asserts floor-reached reporting and that
-  "Squeeze harder" then extends into rungs 12–15.
+  "Squeeze harder" then extends into rungs 23–26.
 - A deliberately **non-monotonic** curve — asserts the returned file is still
   measured at or under target.
 - Asserts no rung is executed twice within a run.
@@ -319,5 +345,5 @@ macOS user account and a Windows machine, and compress a real document end to en
 ## Open items for implementation
 
 - Validate and tune the `QFactor` table against the fixtures.
-- Confirm the macOS universal Ghostscript build; fall back to `dylibbundler` if needed.
+- Confirm the arm64 macOS Ghostscript source build; fall back to `dylibbundler` if needed.
 - Confirm `electron-builder` produces a working NSIS installer from macOS.
