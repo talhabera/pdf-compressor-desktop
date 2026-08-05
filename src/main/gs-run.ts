@@ -10,6 +10,14 @@ export class GsError extends Error {
     message: string,
     readonly exitCode: number | null,
     readonly stderr: string,
+    /**
+     * The originating Node error code when the process could not be started
+     * at all — `ENOENT` for a missing binary, `EACCES` for one that isn't
+     * executable. Without this, a spawn failure and a user cancellation are
+     * indistinguishable downstream (both carry `exitCode: null`), and a broken
+     * installation gets reported to the user as "Cancelled."
+     */
+    readonly code: string | null = null,
   ) {
     super(message)
     this.name = 'GsError'
@@ -42,7 +50,10 @@ export function runGs(gsPath: string, args: string[], signal?: AbortSignal): Pro
 
     child.on('error', (err) => {
       cleanup()
-      reject(new GsError(err.message, null, stderr))
+      // Carry the Node error code through. `errors.ts` checks it before it
+      // checks `exitCode === null`, so this is what distinguishes "Ghostscript
+      // is missing" from "the user pressed Cancel".
+      reject(new GsError(err.message, null, stderr, (err as NodeJS.ErrnoException).code ?? null))
     })
 
     child.on('close', (code) => {
