@@ -65,13 +65,27 @@ export default function ProgressPanel({
       >
         <div className="track-line" />
         <div className="track-target" style={{ left: `${targetPct}%` }} />
-        {history.map((point) => (
-          <div
-            key={point.rungIndex}
-            className="track-tick"
-            style={{ left: `${trackPct(point.bytes, originalBytes)}%` }}
-          />
-        ))}
+        {history.map((point) => {
+          // Whether this measurement fits is a pure function of its own
+          // size and the live target — computed here rather than stored
+          // on the point, so a mid-run target change can't leave a stale
+          // answer sitting in state. This is the same "<= target" test
+          // compress.ts uses to decide what counts as a candidate; the
+          // search then keeps bisecting for a *better* fit (a lower rung
+          // index, less quality lost), so later attempts routinely land
+          // above the line even after a fit has already been found. Left
+          // graphite, those read as "still checking," not as failures —
+          // the fitting ones are the only ones that get the target's
+          // amber, and there is usually more than one before the run ends.
+          const fits = point.bytes <= targetBytes
+          return (
+            <div
+              key={point.rungIndex}
+              className={`track-tick${fits ? ' fits' : ''}`}
+              style={{ left: `${trackPct(point.bytes, originalBytes)}%` }}
+            />
+          )
+        })}
       </div>
 
       <div className="track-scale">

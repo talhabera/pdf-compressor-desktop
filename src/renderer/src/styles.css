@@ -222,6 +222,11 @@ button {
   transform: translate(-50%, -50%);
   animation: tick-in 180ms ease-out backwards;
 }
+/* A measurement that fit under the target — the same amber as the target
+   line itself, so it reads as "found something," not just another mark.
+   Everything that didn't fit stays plain ink: still a real measurement,
+   just not a candidate. */
+.track-tick.fits { background: var(--amber); }
 @keyframes tick-in {
   from { opacity: 0; transform: translate(-50%, -50%) translateY(-2px); }
   to { opacity: 1; transform: translate(-50%, -50%) translateY(0); }
