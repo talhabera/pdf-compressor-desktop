@@ -1,0 +1,20 @@
+node_modules/
+
+# Build output
+dist/
+out/
+build/
+release/
+.vite/
+
+# Bundled Ghostscript binaries — produced by scripts/fetch-ghostscript.sh,
+# far too large for git. See README for the one-time setup step.
+resources/gs/
+
+# Ghostscript build scratch
+.gs-build/
+
+.DS_Store
+*.log
+.env
+.env.local
