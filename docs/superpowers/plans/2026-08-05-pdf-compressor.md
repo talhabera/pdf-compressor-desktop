@@ -898,6 +898,22 @@ describe('compress', () => {
     expect(outcome.outputPath).toBe(`/tmp/rung-${outcome.rungIndex}.pdf`)
   })
 
+  it('reports a smaller attempt estimate in squeeze mode', async () => {
+    // Squeeze searches only four rungs, so reporting the normal-mode estimate
+    // of 6 would leave the progress bar apparently stuck below half throughout.
+    const onProgress = vi.fn()
+    const sizes = curve(50_000_000, 100_000)
+    sizes[15] = 1_000_000
+    const { run } = fakeRunner(sizes)
+    await compress({
+      ...base, allowSqueeze: true, inputBytes: 60_000_000,
+      targetBytes: 1_750_000, runRung: run, onProgress,
+    })
+    for (const call of onProgress.mock.calls) {
+      expect(call[0].estimatedTotal).toBe(4)
+    }
+  })
+
   it('reports progress for every rung it actually runs', async () => {
     const onProgress = vi.fn()
     const { run, calls } = fakeRunner(curve(10_000_000, 500_000))
@@ -954,6 +970,13 @@ export interface CompressOptions {
 /** Rung 0 + the floor probe + ceil(log2(11)) binary-search steps. */
 export const ESTIMATED_ATTEMPTS = 6
 
+/**
+ * Squeeze mode probes rung 15 then binary-searches the three rungs above it,
+ * so it never takes more than four passes. Reporting 6 would leave the progress
+ * bar apparently stuck below half for the whole run.
+ */
+export const ESTIMATED_SQUEEZE_ATTEMPTS = 4
+
 export async function compress(opts: CompressOptions): Promise<CompressOutcome> {
   const { targetBytes, allowSqueeze, runRung, onProgress } = opts
 
@@ -968,7 +991,7 @@ export async function compress(opts: CompressOptions): Promise<CompressOutcome> 
     attempts++
     onProgress?.({
       attempt: attempts,
-      estimatedTotal: ESTIMATED_ATTEMPTS,
+      estimatedTotal: allowSqueeze ? ESTIMATED_SQUEEZE_ATTEMPTS : ESTIMATED_ATTEMPTS,
       rungIndex: index,
       rungLabel: rung.label,
       dpi: rung.dpi,
