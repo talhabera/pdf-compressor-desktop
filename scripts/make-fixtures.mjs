@@ -54,13 +54,33 @@ function encodePng(width, height, pixels) {
   ])
 }
 
-/** Deterministic pseudo-random noise. Noise does not compress, so the PDF stays big. */
-function noiseImage(width, height, seed) {
+/**
+ * Deterministic page image resembling a scan: smooth tonal variation, a few
+ * darker blotches, and light grain. This is what real scanned paper looks like
+ * to a compressor — spatially correlated, so downsampling and JPEG both bite.
+ *
+ * `Math.imul` is required, not decoration. The obvious `s * 1103515245`
+ * exceeds float64's safe integer range, and the resulting precision loss
+ * collapses the sequence into a repeating pattern: measured deflate ratio
+ * 0.0199 versus 1.0003 for this version. That bug made each page compress to
+ * ~46 KB instead of ~4.6 MB, which is why an earlier fixture needed 190 pages
+ * to reach 8 MB.
+ */
+function scanPageImage(width, height, seed) {
   const px = Buffer.alloc(width * height * 3)
-  let s = seed
-  for (let i = 0; i < px.length; i++) {
-    s = (s * 1103515245 + 12345) & 0x7fffffff
-    px[i] = (s >> 16) & 0xff
+  let s = seed | 0
+  for (let y = 0; y < height; y++) {
+    for (let x = 0; x < width; x++) {
+      s = (Math.imul(s, 1103515245) + 12345) | 0
+      const grain = ((s >>> 16) & 0x1f) - 16
+      const tone = 128 + 80 * Math.sin(x / 90) * Math.cos(y / 110) + 40 * Math.sin((x + y) / 50)
+      const blotch = (x * x + y * y) % 9973 < 600 ? -70 : 0
+      const v = Math.max(0, Math.min(255, Math.round(tone + grain + blotch)))
+      const i = (y * width + x) * 3
+      px[i] = v
+      px[i + 1] = v
+      px[i + 2] = v
+    }
   }
   return encodePng(width, height, px)
 }
@@ -85,8 +105,11 @@ async function makeTextHeavy() {
 
 async function makeScanHeavy() {
   const doc = await PDFDocument.create()
-  for (let p = 0; p < 190; p++) {
-    const png = await doc.embedPng(noiseImage(1100, 1400, 7919 + p * 104729))
+  // 1700x2200 into a US Letter page is ~200 DPI, a realistic scan resolution.
+  // Three pages is enough to exceed 8 MB and keeps integration tests fast —
+  // every Ghostscript pass in the search runs over this whole file.
+  for (let p = 0; p < 3; p++) {
+    const png = await doc.embedPng(scanPageImage(1700, 2200, 7919 + p * 104729))
     const page = doc.addPage([612, 792])
     page.drawImage(png, { x: 0, y: 0, width: 612, height: 792 })
   }
