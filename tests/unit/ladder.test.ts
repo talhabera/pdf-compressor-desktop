@@ -2,15 +2,15 @@ import { describe, expect, it } from 'vitest'
 import { RUNGS, FLOOR_INDEX, MAX_INDEX, buildGsArgs } from '../../src/main/ladder'
 
 describe('RUNGS', () => {
-  it('has 16 rungs indexed 0..15', () => {
-    expect(RUNGS).toHaveLength(16)
+  it('has 27 rungs indexed 0..26', () => {
+    expect(RUNGS).toHaveLength(27)
     RUNGS.forEach((r, i) => expect(r.index).toBe(i))
   })
 
-  it('places the readability floor at 11 and the hard limit at 15', () => {
-    expect(FLOOR_INDEX).toBe(11)
-    expect(MAX_INDEX).toBe(15)
-    expect(RUNGS[MAX_INDEX]!.index).toBe(15)
+  it('places the readability floor at 22 and the hard limit at 26', () => {
+    expect(FLOOR_INDEX).toBe(22)
+    expect(MAX_INDEX).toBe(26)
+    expect(RUNGS[MAX_INDEX]!.index).toBe(26)
   })
 
   it('has a structural-only rung 0 with no image settings', () => {
@@ -18,9 +18,23 @@ describe('RUNGS', () => {
     expect(RUNGS[0]!.qFactor).toBeNull()
   })
 
-  it('decreases DPI monotonically from rung 1 down', () => {
+  it('keeps DPI non-increasing from rung 1 down', () => {
+    // Rungs 21 and 22 share the same 72 DPI but differ in QFactor — this is the
+    // final quality step before the floor, deliberately fine-grained.
     for (let i = 2; i <= MAX_INDEX; i++) {
-      expect(RUNGS[i]!.dpi!).toBeLessThan(RUNGS[i - 1]!.dpi!)
+      expect(RUNGS[i]!.dpi!).toBeLessThanOrEqual(RUNGS[i - 1]!.dpi!)
+    }
+  })
+
+  it('limits each DPI step to 12% or less (rungs 2-21), preventing coarse gaps', () => {
+    // The whole point of the fine-grained ladder is to prevent 33% gaps between
+    // rungs, which cause the search to overshoot and waste the user's size budget.
+    // This test guards against that problem creeping back in.
+    for (let i = 2; i <= 21; i++) {
+      const prevDpi = RUNGS[i - 1]!.dpi!
+      const currDpi = RUNGS[i]!.dpi!
+      const dropPercent = ((prevDpi - currDpi) / prevDpi) * 100
+      expect(dropPercent).toBeLessThanOrEqual(12)
     }
   })
 
@@ -57,7 +71,7 @@ describe('buildGsArgs', () => {
   })
 
   it('always uses the pdfwrite device with batch flags', () => {
-    for (const a of [args(0), args(5), args(15)]) {
+    for (const a of [args(0), args(10), args(26)]) {
       expect(a).toContain('-sDEVICE=pdfwrite')
       expect(a).toContain('-dNOPAUSE')
       expect(a).toContain('-dBATCH')
@@ -87,7 +101,7 @@ describe('buildGsArgs', () => {
   it('lowers the downsample threshold so each rung honours its DPI', () => {
     // Default threshold is 1.5, which leaves a 200 DPI scan untouched by every
     // rung down to 133 DPI and creates a large cliff mid-ladder.
-    for (const i of [1, 5, 11, 15]) {
+    for (const i of [1, 8, 16, 26]) {
       expect(args(i)).toContain('-dColorImageDownsampleThreshold=1.0')
       expect(args(i)).toContain('-dGrayImageDownsampleThreshold=1.0')
       expect(args(i)).toContain('-dMonoImageDownsampleThreshold=1.0')
@@ -95,19 +109,19 @@ describe('buildGsArgs', () => {
   })
 
   it('sets colour and gray resolution to the rung DPI', () => {
-    const a = args(5)
+    const a = args(10)
     expect(a).toContain('-dColorImageResolution=150')
     expect(a).toContain('-dGrayImageResolution=150')
   })
 
   it('keeps mono images at twice the DPI but never below 300', () => {
-    expect(args(5)).toContain('-dMonoImageResolution=300')
+    expect(args(10)).toContain('-dMonoImageResolution=300')
     expect(args(1)).toContain('-dMonoImageResolution=500')
-    expect(args(15)).toContain('-dMonoImageResolution=300')
+    expect(args(26)).toContain('-dMonoImageResolution=300')
   })
 
   it('passes the rung QFactor into all four image dicts with 4:2:0 chroma subsampling', () => {
-    const a = args(5)
+    const a = args(10)
     const c = a[a.indexOf('-c') + 1]!
     expect(c).toContain('setdistillerparams')
     expect(c.match(/\/QFactor 0\.4\b/g)).toHaveLength(4)
@@ -128,7 +142,7 @@ describe('buildGsArgs', () => {
   })
 
   it('puts -c before -f, which Ghostscript requires', () => {
-    const a = args(11)
+    const a = args(22)
     expect(a.indexOf('-c')).toBeLessThan(a.indexOf('-f'))
   })
 })

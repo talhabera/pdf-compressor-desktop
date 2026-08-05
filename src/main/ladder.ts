@@ -1,32 +1,55 @@
 import type { Rung } from '@shared/types'
 
 /** Index of the readability floor. Rungs below this need explicit user consent. */
-export const FLOOR_INDEX = 11
+export const FLOOR_INDEX = 22
 /** Index of the harshest rung the app will ever apply. */
-export const MAX_INDEX = 15
+export const MAX_INDEX = 26
 
 const HIGH = 'high quality'
 const REDUCED = 'reduced image quality'
 const HEAVY = 'heavily compressed'
 const EXTREME = 'extremely compressed'
 
+/**
+ * The steps are deliberately fine — 12-19% apart in output size rather than the
+ * ~33% of an earlier, coarser table. Step size is quality the user paid for and
+ * did not receive: the search returns the largest result that still fits, so a
+ * coarse ladder overshoots downward. Measured on a 23.8 MB 300 DPI colour scan
+ * at a 1.75 MB target, the coarse table returned 1,363,051 bytes (78% of the
+ * budget, 150 DPI) where this one returns 1,645,323 (94%, 166 DPI) — same
+ * target, visibly sharper images.
+ *
+ * Sizes below are from that fixture and are indicative, not guarantees; every
+ * rung is measured at run time.
+ */
 export const RUNGS: readonly Rung[] = [
   { index: 0, dpi: null, qFactor: null, label: 'original quality' },
   { index: 1, dpi: 250, qFactor: 0.15, label: HIGH },
-  { index: 2, dpi: 220, qFactor: 0.2, label: HIGH },
-  { index: 3, dpi: 200, qFactor: 0.25, label: HIGH },
-  { index: 4, dpi: 180, qFactor: 0.3, label: HIGH },
-  { index: 5, dpi: 150, qFactor: 0.4, label: REDUCED },
-  { index: 6, dpi: 130, qFactor: 0.5, label: REDUCED },
-  { index: 7, dpi: 110, qFactor: 0.65, label: REDUCED },
-  { index: 8, dpi: 100, qFactor: 0.8, label: REDUCED },
-  { index: 9, dpi: 90, qFactor: 1.0, label: HEAVY },
-  { index: 10, dpi: 80, qFactor: 1.3, label: HEAVY },
-  { index: 11, dpi: 72, qFactor: 2.0, label: HEAVY },
-  { index: 12, dpi: 60, qFactor: 2.4, label: EXTREME },
-  { index: 13, dpi: 50, qFactor: 3.0, label: EXTREME },
-  { index: 14, dpi: 40, qFactor: 3.5, label: EXTREME },
-  { index: 15, dpi: 30, qFactor: 4.0, label: EXTREME },
+  { index: 2, dpi: 235, qFactor: 0.17, label: HIGH },
+  { index: 3, dpi: 220, qFactor: 0.2, label: HIGH },
+  { index: 4, dpi: 205, qFactor: 0.22, label: HIGH },
+  { index: 5, dpi: 195, qFactor: 0.25, label: HIGH },
+  { index: 6, dpi: 185, qFactor: 0.28, label: HIGH },
+  { index: 7, dpi: 175, qFactor: 0.31, label: HIGH },
+  { index: 8, dpi: 166, qFactor: 0.34, label: HIGH },
+  { index: 9, dpi: 158, qFactor: 0.37, label: REDUCED },
+  { index: 10, dpi: 150, qFactor: 0.4, label: REDUCED },
+  { index: 11, dpi: 142, qFactor: 0.44, label: REDUCED },
+  { index: 12, dpi: 134, qFactor: 0.48, label: REDUCED },
+  { index: 13, dpi: 126, qFactor: 0.53, label: REDUCED },
+  { index: 14, dpi: 118, qFactor: 0.58, label: REDUCED },
+  { index: 15, dpi: 110, qFactor: 0.65, label: REDUCED },
+  { index: 16, dpi: 102, qFactor: 0.72, label: HEAVY },
+  { index: 17, dpi: 95, qFactor: 0.8, label: HEAVY },
+  { index: 18, dpi: 88, qFactor: 0.9, label: HEAVY },
+  { index: 19, dpi: 82, qFactor: 1.0, label: HEAVY },
+  { index: 20, dpi: 76, qFactor: 1.15, label: HEAVY },
+  { index: 21, dpi: 72, qFactor: 1.4, label: HEAVY },
+  { index: 22, dpi: 72, qFactor: 2.0, label: HEAVY },
+  { index: 23, dpi: 60, qFactor: 2.4, label: EXTREME },
+  { index: 24, dpi: 50, qFactor: 3.0, label: EXTREME },
+  { index: 25, dpi: 40, qFactor: 3.5, label: EXTREME },
+  { index: 26, dpi: 30, qFactor: 4.0, label: EXTREME },
 ]
 
 const BASE_ARGS = [
