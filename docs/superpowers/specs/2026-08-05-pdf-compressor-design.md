@@ -158,7 +158,7 @@ Given an input file and a target byte count:
 **Squeeze harder** runs the same procedure over the beyond-floor rungs: try rung
 26 first, and if it lands at or under target, binary search rungs 23–26 for the
 highest-quality rung that fits. If rung 26 still exceeds target, the file cannot
-be compressed to that size by this tool at all — report the rung 15 size as the
+be compressed to that size by this tool at all — report the rung 26 size as the
 best achievable and stop.
 
 Worst case is about seven Ghostscript passes. On a 20 MB scan this is roughly
@@ -312,7 +312,7 @@ install seamless; this is not planned for the first version.
 - A shallow curve where the optimum sits mid-ladder — asserts the search picks
   the *highest-quality* qualifying rung, not merely a qualifying one.
 - A curve where even the floor misses — asserts floor-reached reporting and that
-  "Squeeze harder" then extends into rungs 12–15.
+  "Squeeze harder" then extends into rungs 23–26.
 - A deliberately **non-monotonic** curve — asserts the returned file is still
   measured at or under target.
 - Asserts no rung is executed twice within a run.
