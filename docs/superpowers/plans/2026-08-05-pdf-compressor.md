@@ -573,6 +573,18 @@ export interface CompressProgress {
   rungIndex: number
   rungLabel: string
   dpi: number | null
+  /**
+   * The measured output size, or `null` while the attempt is still running.
+   *
+   * Each attempt emits twice: once on start with `bytes: null`, once on
+   * completion with the real byte count. The UI needs both — the first drives
+   * "attempt 3 of 6, trying reduced image quality" during a pass that can take
+   * several seconds, and the second is the only place a *measured* size for an
+   * intermediate attempt exists. Without the pair, a progress display could
+   * only ever infer sizes, and an inferred number presented as a measurement
+   * is worse than no number at all.
+   */
+  bytes: number | null
 }
 
 export interface CompressOutcome {
@@ -914,18 +926,40 @@ describe('compress', () => {
     }
   })
 
-  it('reports progress for every rung it actually runs', async () => {
+  it('reports progress twice per rung: once starting, once measured', async () => {
     const onProgress = vi.fn()
     const { run, calls } = fakeRunner(curve(10_000_000, 500_000))
     await compress({
       ...base, inputBytes: 12_000_000, targetBytes: 7_200_000, runRung: run, onProgress,
     })
-    expect(onProgress).toHaveBeenCalledTimes(calls.length)
+    expect(onProgress).toHaveBeenCalledTimes(calls.length * 2)
+
     const first = onProgress.mock.calls[0]![0]
     expect(first.attempt).toBe(1)
     expect(first.rungIndex).toBe(0)
     expect(first.estimatedTotal).toBeGreaterThan(0)
     expect(first.rungLabel).toBe(RUNGS[0]!.label)
+    expect(first.bytes).toBeNull()
+
+    const second = onProgress.mock.calls[1]![0]
+    expect(second.attempt).toBe(1)
+    expect(second.rungIndex).toBe(0)
+    expect(second.bytes).toBe(10_000_000)
+  })
+
+  it('never reports a size it did not measure', async () => {
+    // Every populated `bytes` must equal what the runner actually returned for
+    // that rung. A progress display showing inferred sizes as measurements
+    // would be worse than showing none.
+    const onProgress = vi.fn()
+    const sizes = curve(10_000_000, 500_000)
+    const { run } = fakeRunner(sizes)
+    await compress({
+      ...base, inputBytes: 12_000_000, targetBytes: 7_200_000, runRung: run, onProgress,
+    })
+    for (const [event] of onProgress.mock.calls) {
+      if (event.bytes !== null) expect(event.bytes).toBe(sizes[event.rungIndex])
+    }
   })
 
   it('propagates runner errors instead of swallowing them', async () => {
@@ -989,15 +1023,21 @@ export async function compress(opts: CompressOptions): Promise<CompressOutcome> 
 
     const rung = RUNGS[index]!
     attempts++
-    onProgress?.({
+    // Each attempt reports twice: once on start so the UI can say what is
+    // being tried during a pass that may take several seconds, and once on
+    // completion carrying the measured size. The completion event is the only
+    // place an intermediate attempt's real size is ever available.
+    const event = {
       attempt: attempts,
       estimatedTotal: allowSqueeze ? ESTIMATED_SQUEEZE_ATTEMPTS : ESTIMATED_ATTEMPTS,
       rungIndex: index,
       rungLabel: rung.label,
       dpi: rung.dpi,
-    })
+    }
+    onProgress?.({ ...event, bytes: null })
     const result = await runRung(rung)
     measured.set(index, result)
+    onProgress?.({ ...event, bytes: result.bytes })
     return result
   }
 
