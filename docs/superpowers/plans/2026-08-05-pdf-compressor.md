@@ -1597,14 +1597,26 @@ describe('makeRungRunner', () => {
     expect(result.bytes).toBeLessThan(statSync(SCAN).size / 2)
   })
 
-  it('aborts when the signal fires', async () => {
+  it('aborts when the signal fires, with no Node error code', async () => {
     const controller = new AbortController()
     const run = makeRungRunner({
       gsPath: GS, inputPath: SCAN, workDir: work, signal: controller.signal,
     })
     const pending = run(RUNGS[1]!)
     setTimeout(() => controller.abort(), 50)
-    await expect(pending).rejects.toThrow()
+    // `code: null` is what marks this a genuine cancellation rather than a
+    // failure to start, so assert it rather than merely that it rejected.
+    await expect(pending).rejects.toMatchObject({ exitCode: null, code: null })
+  })
+
+  it('reports a missing binary with its Node error code, not as a cancellation', async () => {
+    // A spawn failure and a user cancellation both produce exitCode: null.
+    // Without the code, a broken installation is reported to the user as
+    // "Cancelled." — which tells them nothing and blames them for it.
+    const run = makeRungRunner({
+      gsPath: '/nonexistent/path/to/gs', inputPath: SCAN, workDir: work,
+    })
+    await expect(run(RUNGS[5]!)).rejects.toMatchObject({ code: 'ENOENT' })
   })
 
   // The spec promises text is never rasterized at ANY rung. The one plausible
@@ -1666,6 +1678,14 @@ export class GsError extends Error {
     message: string,
     readonly exitCode: number | null,
     readonly stderr: string,
+    /**
+     * The originating Node error code when the process could not be started
+     * at all — `ENOENT` for a missing binary, `EACCES` for one that isn't
+     * executable. Without this, a spawn failure and a user cancellation are
+     * indistinguishable downstream (both carry `exitCode: null`), and a broken
+     * installation gets reported to the user as "Cancelled."
+     */
+    readonly code: string | null = null,
   ) {
     super(message)
     this.name = 'GsError'
@@ -1698,7 +1718,10 @@ export function runGs(gsPath: string, args: string[], signal?: AbortSignal): Pro
 
     child.on('error', (err) => {
       cleanup()
-      reject(new GsError(err.message, null, stderr))
+      // Carry the Node error code through. `errors.ts` checks it before it
+      // checks `exitCode === null`, so this is what distinguishes "Ghostscript
+      // is missing" from "the user pressed Cancel".
+      reject(new GsError(err.message, null, stderr, (err as NodeJS.ErrnoException).code ?? null))
     })
 
     child.on('close', (code) => {
