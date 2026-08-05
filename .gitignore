@@ -6,6 +6,7 @@ out/
 build/
 release/
 .vite/
+*.tsbuildinfo
 
 # Bundled Ghostscript binaries — produced by scripts/fetch-ghostscript.sh,
 # far too large for git. See README for the one-time setup step.
