@@ -62,7 +62,7 @@ harshest.
 
 | Rung | DPI | JPEG q | QFactor | Notes |
 |---|---|---|---|---|
-| 0 | — | — | — | Structural only: dedupe images, subset fonts, recompress streams. Zero quality loss. |
+| 0 | — | — | — | Structural only: dedupe images, subset fonts, recompress streams. Zero quality loss — achieved by forcing `FlateEncode`, because `pdfwrite`'s `AutoFilter` default silently re-encodes images as lossy JPEG. |
 | 1 | 250 | 90 | 0.15 | |
 | 2 | 220 | 85 | 0.20 | |
 | 3 | 200 | 82 | 0.25 | |
