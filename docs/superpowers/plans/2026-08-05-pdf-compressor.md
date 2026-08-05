@@ -395,7 +395,7 @@ git commit -m "chore: scaffold Electron + React + TypeScript project"
 **Interfaces:**
 - Consumes: nothing.
 - Produces:
-  - `interface Rung { index: number; dpi: number | null; qFactor: number | null; grayscale: boolean; label: string }`
+  - `interface Rung { index: number; dpi: number | null; qFactor: number | null; label: string }`
   - `const RUNGS: readonly Rung[]` — 16 entries, index 0–15
   - `const FLOOR_INDEX = 11`, `const MAX_INDEX = 15`
   - `function buildGsArgs(rung: Rung, inputPath: string, outputPath: string): string[]`
@@ -423,7 +423,6 @@ describe('RUNGS', () => {
   it('has a structural-only rung 0 with no image settings', () => {
     expect(RUNGS[0]!.dpi).toBeNull()
     expect(RUNGS[0]!.qFactor).toBeNull()
-    expect(RUNGS[0]!.grayscale).toBe(false)
   })
 
   it('decreases DPI monotonically from rung 1 down', () => {
@@ -438,10 +437,13 @@ describe('RUNGS', () => {
     }
   })
 
-  it('turns on grayscale at the floor and keeps it on below', () => {
-    expect(RUNGS[FLOOR_INDEX - 1]!.grayscale).toBe(false)
-    for (let i = FLOOR_INDEX; i <= MAX_INDEX; i++) {
-      expect(RUNGS[i]!.grayscale).toBe(true)
+  it('never converts colour to grayscale at any rung', () => {
+    // Turning a colour document black and white changes its content, not its
+    // quality. An earlier ladder did this from the floor down; it made scanned
+    // forms, signatures and charts come back monochrome without being asked.
+    for (let i = 0; i <= MAX_INDEX; i++) {
+      expect(args(i).join(' ')).not.toContain('ColorConversionStrategy')
+      expect(args(i).join(' ')).not.toContain('DeviceGray')
     }
   })
 
@@ -520,11 +522,6 @@ describe('buildGsArgs', () => {
     }
   })
 
-  it('converts to grayscale only at and below the floor', () => {
-    expect(args(10)).not.toContain('-sColorConversionStrategy=Gray')
-    expect(args(11)).toContain('-sColorConversionStrategy=Gray')
-  })
-
   it('never passes -dProcessColorModel, which pdfwrite rejects outright', () => {
     // Ghostscript 10.07 fails with "rangecheck in .putdeviceprops" — this would
     // kill every rung from the readability floor down.
@@ -556,7 +553,6 @@ export interface Rung {
   dpi: number | null
   /** Ghostscript JPEG QFactor. Higher is worse. `null` on rung 0. */
   qFactor: number | null
-  grayscale: boolean
   /** Plain-language quality description shown to the user. */
   label: string
 }
@@ -638,22 +634,22 @@ const HEAVY = 'heavily compressed'
 const EXTREME = 'extremely compressed'
 
 export const RUNGS: readonly Rung[] = [
-  { index: 0, dpi: null, qFactor: null, grayscale: false, label: 'original quality' },
-  { index: 1, dpi: 250, qFactor: 0.15, grayscale: false, label: HIGH },
-  { index: 2, dpi: 220, qFactor: 0.2, grayscale: false, label: HIGH },
-  { index: 3, dpi: 200, qFactor: 0.25, grayscale: false, label: HIGH },
-  { index: 4, dpi: 180, qFactor: 0.3, grayscale: false, label: HIGH },
-  { index: 5, dpi: 150, qFactor: 0.4, grayscale: false, label: REDUCED },
-  { index: 6, dpi: 130, qFactor: 0.5, grayscale: false, label: REDUCED },
-  { index: 7, dpi: 110, qFactor: 0.65, grayscale: false, label: REDUCED },
-  { index: 8, dpi: 100, qFactor: 0.8, grayscale: false, label: REDUCED },
-  { index: 9, dpi: 90, qFactor: 1.0, grayscale: false, label: HEAVY },
-  { index: 10, dpi: 80, qFactor: 1.3, grayscale: false, label: HEAVY },
-  { index: 11, dpi: 72, qFactor: 2.0, grayscale: true, label: HEAVY },
-  { index: 12, dpi: 60, qFactor: 2.4, grayscale: true, label: EXTREME },
-  { index: 13, dpi: 50, qFactor: 3.0, grayscale: true, label: EXTREME },
-  { index: 14, dpi: 40, qFactor: 3.5, grayscale: true, label: EXTREME },
-  { index: 15, dpi: 30, qFactor: 4.0, grayscale: true, label: EXTREME },
+  { index: 0, dpi: null, qFactor: null, label: 'original quality' },
+  { index: 1, dpi: 250, qFactor: 0.15, label: HIGH },
+  { index: 2, dpi: 220, qFactor: 0.2, label: HIGH },
+  { index: 3, dpi: 200, qFactor: 0.25, label: HIGH },
+  { index: 4, dpi: 180, qFactor: 0.3, label: HIGH },
+  { index: 5, dpi: 150, qFactor: 0.4, label: REDUCED },
+  { index: 6, dpi: 130, qFactor: 0.5, label: REDUCED },
+  { index: 7, dpi: 110, qFactor: 0.65, label: REDUCED },
+  { index: 8, dpi: 100, qFactor: 0.8, label: REDUCED },
+  { index: 9, dpi: 90, qFactor: 1.0, label: HEAVY },
+  { index: 10, dpi: 80, qFactor: 1.3, label: HEAVY },
+  { index: 11, dpi: 72, qFactor: 2.0, label: HEAVY },
+  { index: 12, dpi: 60, qFactor: 2.4, label: EXTREME },
+  { index: 13, dpi: 50, qFactor: 3.0, label: EXTREME },
+  { index: 14, dpi: 40, qFactor: 3.5, label: EXTREME },
+  { index: 15, dpi: 30, qFactor: 4.0, label: EXTREME },
 ]
 
 const BASE_ARGS = [
@@ -728,10 +724,12 @@ export function buildGsArgs(rung: Rung, inputPath: string, outputPath: string): 
     '-dColorImageFilter=/DCTEncode',
     '-dAutoFilterGrayImages=false',
     '-dGrayImageFilter=/DCTEncode',
-    // Do NOT add -dProcessColorModel=/DeviceGray here. It is a raster-device
-    // parameter; pdfwrite rejects it with "Unrecoverable error: rangecheck in
-    // .putdeviceprops", which kills every rung from the readability floor down.
-    ...(rung.grayscale ? ['-sColorConversionStrategy=Gray'] : []),
+    // No colour conversion at any rung. Turning a colour document black and
+    // white is a change to its content, not a reduction in quality, and the
+    // app must never make that decision on the user's behalf. (Also note
+    // -dProcessColorModel=/DeviceGray must never be added here: it is a
+    // raster-device parameter and pdfwrite rejects it outright with
+    // "rangecheck in .putdeviceprops".)
     `-sOutputFile=${outputPath}`,
     '-c',
     distillerParams(rung.qFactor),
@@ -1687,11 +1685,10 @@ describe('makeRungRunner', () => {
     await expect(run(RUNGS[5]!)).rejects.toMatchObject({ code: 'ENOENT' })
   })
 
-  // The spec promises text is never rasterized at ANY rung. The one plausible
-  // way Ghostscript could break that promise is colour conversion across a
-  // transparency group, which can force local flattening of that region.
-  // Rungs 11+ convert to grayscale, so that is exactly where to look.
-  it('keeps text selectable through grayscale conversion of a transparency group', async () => {
+  // The spec promises text is never rasterized at ANY rung, and transparency
+  // groups are where Ghostscript is most likely to break that by flattening a
+  // region to pixels. Checked at the floor and at the harshest rung.
+  it('keeps text selectable through a transparency group at the harshest rungs', async () => {
     const { PDFDocument, StandardFonts, rgb } = await import('pdf-lib')
     const doc = await PDFDocument.create()
     const font = await doc.embedFont(StandardFonts.Helvetica)

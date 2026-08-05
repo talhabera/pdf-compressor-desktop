@@ -73,7 +73,7 @@ harshest.
 | 8 | 100 | 60 | 0.80 | |
 | 9 | 90 | 55 | 1.00 | |
 | 10 | 80 | 50 | 1.30 | |
-| 11 | 72 | 40 | 2.00 | Also converts to grayscale. **Readability floor.** |
+| 11 | 72 | 40 | 2.00 | **Readability floor.** |
 | 12 | 60 | 35 | 2.40 | Beyond floor — "Squeeze harder" only |
 | 13 | 50 | 30 | 3.00 | Beyond floor |
 | 14 | 40 | 25 | 3.50 | Beyond floor |
@@ -85,8 +85,14 @@ the "Squeeze harder" button.
 
 Text and vector content is never rasterized at any rung. Ghostscript's `pdfwrite`
 device re-encodes embedded raster images only; glyphs stay glyphs and remain
-selectable and searchable in the output at every rung, including 15. The
-grayscale conversion at rung 11+ affects color rendering, not text fidelity.
+selectable and searchable in the output at every rung, including 15.
+
+**Colour is preserved at every rung.** An earlier version of this design
+converted rungs 11 and below to grayscale, which bought 37–52% but turned colour
+documents black and white — a change to the document's *content*, not its
+quality. The app never makes that decision on the user's behalf. If a target is
+only reachable by discarding colour, the honest answer is to report the smallest
+size achievable and let the user decide.
 
 The `QFactor` values above are a starting table derived from the conventional
 Ghostscript quality mapping (roughly `QFactor ≈ (100 − q) / 25` through the
@@ -126,7 +132,6 @@ gs -sDEVICE=pdfwrite -dCompatibilityLevel=1.7 \
    -dMonoImageResolution=<max(DPI*2, 300)> \
    -dAutoFilterColorImages=false -dColorImageFilter=/DCTEncode \
    -dAutoFilterGrayImages=false  -dGrayImageFilter=/DCTEncode \
-   [-sColorConversionStrategy=Gray -dProcessColorModel=/DeviceGray]  # rung >= 11
    -sOutputFile=<out> \
    -c "<</ColorACSImageDict <</QFactor <QF> /Blend 1 /HSamples [1 1 1 1] /VSamples [1 1 1 1]>>
         /ColorImageDict    <</QFactor <QF> /Blend 1 /HSamples [1 1 1 1] /VSamples [1 1 1 1]>>
