@@ -78,6 +78,23 @@ describe('compress', () => {
     expect(calls.every((c) => c <= FLOOR_INDEX)).toBe(true)
   })
 
+  it('returns the smallest measured file when the target is unreachable', async () => {
+    // Rung 0 is lossless Flate; on text-heavy documents it can beat the floor's
+    // heavy JPEG. Returning the floor there would hand back a file that is both
+    // larger and worse than one already measured and sitting on disk.
+    const sizes: Record<number, number> = {}
+    for (let i = 0; i <= MAX_INDEX; i++) sizes[i] = 5_000_000
+    sizes[0] = 3_000_000            // lossless wins outright
+    sizes[FLOOR_INDEX] = 4_000_000
+    const { run } = fakeRunner(sizes)
+    const outcome = await compress({
+      ...base, inputBytes: 9_000_000, targetBytes: 1_000_000, runRung: run,
+    })
+    expect(outcome.status).toBe('floor-reached')
+    expect(outcome.bytes).toBe(3_000_000)
+    expect(outcome.rungIndex).toBe(0)
+  })
+
   it('reports floor-reached and keeps the floor output when the target is unsafe', async () => {
     // Use a curve where even the floor rung is above target.
     const { run, calls } = fakeRunner(curve(50_000_000, 0.90))
@@ -120,8 +137,7 @@ describe('compress', () => {
   })
 
   it('reports a smaller attempt estimate in squeeze mode', async () => {
-    // Squeeze searches only four rungs, so reporting the normal-mode estimate
-    // of 7 would leave the progress bar apparently stuck below half throughout.
+    // Squeeze probes rung 26 + at most 2 binary steps over [23..25] = 3 passes max.
     const onProgress = vi.fn()
     const sizes = curve(50_000_000, 0.85)
     sizes[26] = 1_000_000
@@ -131,7 +147,7 @@ describe('compress', () => {
       targetBytes: 1_750_000, runRung: run, onProgress,
     })
     for (const call of onProgress.mock.calls) {
-      expect(call[0].estimatedTotal).toBe(4)
+      expect(call[0].estimatedTotal).toBe(3)
     }
   })
 

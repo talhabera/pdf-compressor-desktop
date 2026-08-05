@@ -22,11 +22,10 @@ export interface CompressOptions {
 export const ESTIMATED_ATTEMPTS = 7
 
 /**
- * Squeeze mode probes rung 15 and binary-searches only three rungs [12..14],
- * so it never takes more than four passes. Reporting 6 would leave the progress
- * bar apparently stuck below half for the whole run.
+ * Squeeze mode probes rung 26 and binary-searches at most two rungs from [23..25],
+ * so it never exceeds three passes. One probe + two binary steps = 3 max.
  */
-export const ESTIMATED_SQUEEZE_ATTEMPTS = 4
+export const ESTIMATED_SQUEEZE_ATTEMPTS = 3
 
 export async function compress(opts: CompressOptions): Promise<CompressOutcome> {
   const { targetBytes, allowSqueeze, runRung, onProgress } = opts
@@ -97,7 +96,17 @@ export async function compress(opts: CompressOptions): Promise<CompressOutcome> 
   // If the harshest permitted rung still misses, nothing between it and rung 0 can fit.
   const harshestResult = await run(harshest)
   if (harshestResult.bytes > targetBytes) {
-    return done(allowSqueeze ? 'impossible' : 'floor-reached', harshest, harshestResult)
+    // Return the smallest measured result, not necessarily the harshest rung.
+    // On lossless-friendly documents (text + logo), rung 0 may be smaller than the floor.
+    let bestMissing = harshest
+    let bestMissingResult = harshestResult
+    for (const [idx, result] of measured) {
+      if (result.bytes < bestMissingResult.bytes) {
+        bestMissing = idx
+        bestMissingResult = result
+      }
+    }
+    return done(allowSqueeze ? 'impossible' : 'floor-reached', bestMissing, bestMissingResult)
   }
 
   // Binary search for the lowest index (= highest quality) that fits. `best` only
