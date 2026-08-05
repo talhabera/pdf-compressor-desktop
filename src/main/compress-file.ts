@@ -1,6 +1,6 @@
 import { mkdtemp, rm, stat } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
-import { dirname, join } from 'node:path'
+import { basename, dirname, join, resolve } from 'node:path'
 import type { CompressProgress, CompressResponse } from '@shared/types'
 import { compress } from './compress'
 import { classifyFailure } from './errors'
@@ -58,7 +58,10 @@ export async function compressFile(opts: CompressFileOptions): Promise<CompressR
 
     // Nothing was produced, so nothing needs keeping.
     if (outcome.outputPath === null) {
-      await rm(workDir, { recursive: true, force: true })
+      // Guarded like the catch-path rm below. Without this, a filesystem
+      // hiccup while removing an empty temp dir would turn "your file is
+      // already small enough" into "Compression failed on this file."
+      await rm(workDir, { recursive: true, force: true }).catch(() => {})
     }
     return { ok: true, outcome }
   } catch (err) {
@@ -72,7 +75,14 @@ export async function compressFile(opts: CompressFileOptions): Promise<CompressR
  * saved the file or dismissed the result. Refuses paths outside our own temp dirs.
  */
 export async function cleanupWorkDir(outputPath: string): Promise<void> {
-  const dir = dirname(outputPath)
-  if (!dir.startsWith(join(tmpdir(), WORK_PREFIX))) return
+  // This deletes a directory recursively, so containment has to be exact.
+  // `dir.startsWith(prefix)` is not: `dirname()` does not collapse `..`, so
+  // `<tmp>/pdf-compressor-ABC/../../../../Users/me/.ssh/id_rsa` passes a prefix
+  // test while resolving somewhere else entirely — and that is where `rm` would
+  // operate. Resolve first, then require the parent to be exactly the temp
+  // directory and the basename to carry our prefix.
+  const dir = resolve(dirname(outputPath))
+  if (dirname(dir) !== resolve(tmpdir())) return
+  if (!basename(dir).startsWith(WORK_PREFIX)) return
   await rm(dir, { recursive: true, force: true }).catch(() => {})
 }
