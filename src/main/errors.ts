@@ -6,6 +6,7 @@ const MESSAGES: Record<FailureKind, string> = {
   encrypted: 'This PDF is password-protected. Remove the password and try again.',
   'no-space': 'Ran out of disk space while compressing.',
   'gs-missing': "Something's wrong with this installation — please reinstall.",
+  'input-unreadable': "Couldn't open that file. It may have been moved, renamed, or deleted.",
   cancelled: 'Cancelled.',
   unknown: 'Compression failed on this file.',
 }

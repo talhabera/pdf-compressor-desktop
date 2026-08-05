@@ -38,6 +38,7 @@ export type FailureKind =
   | 'encrypted'
   | 'no-space'
   | 'gs-missing'
+  | 'input-unreadable'
   | 'cancelled'
   | 'unknown'
 

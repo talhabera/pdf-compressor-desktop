@@ -18,9 +18,28 @@ export interface CompressFileOptions {
 const WORK_PREFIX = 'pdf-compressor-'
 
 export async function compressFile(opts: CompressFileOptions): Promise<CompressResponse> {
+  // Reading the input is checked separately from everything else. Both a
+  // missing input file and a missing Ghostscript binary raise ENOENT, and
+  // `classifyFailure` sees only the code — so without this, a PDF the user
+  // moved or renamed would be reported as "Something's wrong with this
+  // installation — please reinstall.", sending them to reinstall a working app
+  // while the real problem goes untouched.
+  let inputBytes: number
+  try {
+    inputBytes = (await stat(opts.inputPath)).size
+  } catch (err) {
+    return {
+      ok: false,
+      failure: {
+        kind: 'input-unreadable',
+        message: "Couldn't open that file. It may have been moved, renamed, or deleted.",
+        details: err instanceof Error ? (err.stack ?? err.message) : String(err),
+      },
+    }
+  }
+
   let workDir: string | null = null
   try {
-    const { size: inputBytes } = await stat(opts.inputPath)
     workDir = await mkdtemp(join(tmpdir(), WORK_PREFIX))
 
     const outcome = await compress({

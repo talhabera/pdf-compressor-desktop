@@ -77,14 +77,30 @@ describe('compressFile', () => {
     await cleanupWorkDir(res.outcome.outputPath!)
   }, 300_000)
 
-  it('returns a failure rather than throwing on a non-PDF', async () => {
+  it('reports a missing input as unreadable, not as a broken installation', async () => {
+    // A missing input file and a missing Ghostscript binary both raise ENOENT.
+    // Telling someone whose PDF moved to reinstall the app is actively
+    // misleading, so this pins the distinction.
     const res = await compressFile({
       ...base, inputPath: join(FIXTURES, 'nope.pdf'), targetBytes: 1_750_000,
     })
     expect(res.ok).toBe(false)
     if (res.ok) return
-    expect(res.failure.message).toBeTruthy()
+    expect(res.failure.kind).toBe('input-unreadable')
+    expect(res.failure.message).toBe(
+      "Couldn't open that file. It may have been moved, renamed, or deleted.",
+    )
   })
+
+  it('still reports a genuinely missing Ghostscript as an installation problem', async () => {
+    const res = await compressFile({
+      ...base, gsPath: '/nonexistent/path/to/gs',
+      inputPath: SCAN, targetBytes: 1_750_000,
+    })
+    expect(res.ok).toBe(false)
+    if (res.ok) return
+    expect(res.failure.kind).toBe('gs-missing')
+  }, 60_000)
 
   it('reports progress in increasing attempt order', async () => {
     const seen: number[] = []
