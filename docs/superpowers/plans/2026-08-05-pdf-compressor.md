@@ -73,8 +73,9 @@ README.md
 ### Task 1: Project scaffold
 
 **Files:**
-- Create: `package.json`, `electron.vite.config.ts`, `electron-builder.yml`, `tsconfig.json`, `tsconfig.node.json`, `tsconfig.web.json`, `vitest.config.ts`, `.npmrc`
+- Create: `package.json`, `electron.vite.config.ts`, `tsconfig.json`, `tsconfig.node.json`, `tsconfig.web.json`, `vitest.config.ts`
 - Create: `src/main/index.ts`, `src/preload/index.ts`, `src/renderer/index.html`, `src/renderer/src/main.tsx`, `src/renderer/src/App.tsx`
+- Note: `electron-builder.yml` is created in Task 11, which specifies its full content. Do not stub it here.
 - Test: `tests/unit/format.test.ts`, `src/renderer/src/format.ts`
 
 **Interfaces:**
