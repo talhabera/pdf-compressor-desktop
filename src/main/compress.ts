@@ -24,6 +24,9 @@ export const ESTIMATED_ATTEMPTS = 6
 export async function compress(opts: CompressOptions): Promise<CompressOutcome> {
   const { targetBytes, allowSqueeze, runRung, onProgress } = opts
 
+  // Cache results per rung to prevent re-execution. Today the three search phases
+  // (rung 0, floor, binary search) are disjoint by construction, but this guard
+  // protects against future ladder-bound changes.
   const measured = new Map<number, RungResult>()
   let attempts = 0
 

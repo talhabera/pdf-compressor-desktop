@@ -148,6 +148,24 @@ describe('compress', () => {
     expect(first.rungLabel).toBe(RUNGS[0]!.label)
   })
 
+  it('correctly handles a spike in the binary search path', async () => {
+    // Probe sequence: [0, 11, 5, 8, 9, 10]
+    // Spike at rung 8 is on the path and must not be returned even though it's visited.
+    // curve(20M, 1M) gives rung 8 = 12M normally, but we spike it to 15M.
+    // Neighbors: rung 7 = 13M, rung 9 = 11M, so the spike is clearly visible.
+    // With target 9.5M, rung 8's spike (15M) must be rejected, and rung 11 (9M) returned.
+    const sizes = curve(20_000_000, 1_000_000)
+    sizes[8] = 15_000_000
+    const { run, calls } = fakeRunner(sizes)
+    const outcome = await compress({
+      ...base, inputBytes: 25_000_000, targetBytes: 9_500_000, runRung: run,
+    })
+    expect(outcome.status).toBe('hit-target')
+    expect(outcome.bytes).toBeLessThanOrEqual(9_500_000)
+    expect(outcome.outputPath).toBe(`/tmp/rung-${outcome.rungIndex}.pdf`)
+    expect(calls).toEqual([0, FLOOR_INDEX, 5, 8, 9, 10])
+  })
+
   it('propagates runner errors instead of swallowing them', async () => {
     const boom = async () => { throw new Error('ghostscript exploded') }
     await expect(
